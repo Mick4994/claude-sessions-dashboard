@@ -1,0 +1,11 @@
+__pycache__/
+*.py[cod]
+.venv/
+.uv-cache/
+dist/
+build/
+*.spec
+.pytest_cache/
+.ruff_cache/
+*.log
+config.local.ini
