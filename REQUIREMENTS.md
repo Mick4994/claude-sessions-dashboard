@@ -278,7 +278,7 @@ D:/Codes/claude-sessions-dashboard/      ← 本项目（Python/PySide6）
 │   │   ├── main_window.py      # QMainWindow 子类 + 贴边/展开/收起
 │   │   ├── indicator_widget.py # 单个指示灯 + 卡片复合控件
 │   │   └── tray.py             # QSystemTrayIcon
-│   ├── platform/
+│   ├── win32/
 │   │   ├── windows_focus.py    # 激活 CC 终端窗口
 │   │   └── autostart.py        # 任务计划程序封装
 │   └── utils/
