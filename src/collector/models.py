@@ -9,3 +9,20 @@ class SessionStatus(Enum):
     PERMISSION = "permission"    # 常亮黄
     ERROR = "error"              # 闪烁红
     STALE = "stale"              # 不亮灰
+
+from dataclasses import dataclass
+
+
+@dataclass
+class Session:
+    """In-memory representation of one Claude Code session."""
+
+    id: str
+    jsonl_path: str
+    cwd: str
+    title: str = ""
+    subtitle: str = ""
+    context_pct: float = 0.0
+    model: str = ""
+    status: SessionStatus = SessionStatus.IDLE
+    last_activity_ts: float = 0.0
