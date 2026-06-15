@@ -21,16 +21,17 @@ def test_session_minimal():
     )
     assert s.id == "abc-123"
     assert s.cwd == "C:/Users/me"
-    assert s.title == ""           # default
-    assert s.subtitle == ""        # default
-    assert s.context_pct == 0.0    # default
-    assert s.model == ""           # default
+    assert s.title == ""  # default
+    assert s.subtitle == ""  # default
+    assert s.context_pct == 0.0  # default
+    assert s.model == ""  # default
     assert s.status == SessionStatus.IDLE  # default
-    assert s.last_activity_ts == 0.0       # default
+    assert s.last_activity_ts == 0.0  # default
 
 
 def test_session_full():
     from datetime import datetime
+
     s = Session(
         id="x",
         jsonl_path="p",
