@@ -113,7 +113,7 @@ cd D:/Codes/claude-sessions-dashboard && git init && git add . && git commit -m 
 - Create: `src/collector/__init__.py`
 - Create: `src/collector/models.py` (empty stub)
 - Create: `src/ui/__init__.py`
-- Create: `src/platform/__init__.py`
+- Create: `src/win32/__init__.py`
 - Create: `src/utils/__init__.py`
 - Create: `tests/__init__.py`
 - Create: `tests/conftest.py`
@@ -123,13 +123,13 @@ cd D:/Codes/claude-sessions-dashboard && git init && git add . && git commit -m 
 **Step 1:** Create directory structure
 
 ```bash
-cd D:/Codes/claude-sessions-dashboard && mkdir -p src/collector src/ui src/platform src/utils tests/fixtures scripts
+cd D:/Codes/claude-sessions-dashboard && mkdir -p src/collector src/ui src/win32 src/utils tests/fixtures scripts
 ```
 
 **Step 2:** Touch `__init__.py` in each package
 
 ```bash
-for d in src src/collector src/ui src/platform src/utils tests scripts; do touch "$d/__init__.py"; done
+for d in src src/collector src/ui src/win32 src/utils tests scripts; do touch "$d/__init__.py"; done
 ```
 
 **Step 3:** Create `tests/conftest.py` with qapp fixture
@@ -2523,7 +2523,7 @@ git add . && git commit -m "feat(ui): drag + edge-snap on right edge only"
 
 **Files:**
 - Test: `tests/test_windows_focus.py`
-- Create: `src/platform/windows_focus.py`
+- Create: `src/win32/windows_focus.py`
 
 **Step 1:** Implement (integration test on real Windows)
 
@@ -2531,7 +2531,7 @@ git add . && git commit -m "feat(ui): drag + edge-snap on right edge only"
 # tests/test_windows_focus.py
 import os
 from pathlib import Path
-from src.platform.windows_focus import find_terminal_for_cwd
+from src.win32.windows_focus import find_terminal_for_cwd
 
 
 def test_find_terminal_returns_none_when_no_match():
@@ -2545,7 +2545,7 @@ def test_find_terminal_returns_none_when_no_match():
 **Step 2:** Implement
 
 ```python
-# src/platform/windows_focus.py
+# src/win32/windows_focus.py
 from __future__ import annotations
 
 import ctypes
@@ -2626,7 +2626,7 @@ def on_card_clicked(session_id: str):
     if sess is None:
         return
     if os.name == "nt":
-        from src.platform.windows_focus import find_terminal_for_cwd, activate_window
+        from src.win32.windows_focus import find_terminal_for_cwd, activate_window
         hwnd = find_terminal_for_cwd(sess.cwd)
         if hwnd:
             activate_window(hwnd)
@@ -2825,12 +2825,12 @@ git add . && git commit -m "feat(utils): add single-instance lock via QLocalServ
 ### Task 14.1: schtasks wrapper
 
 **Files:**
-- Create: `src/platform/autostart.py`
+- Create: `src/win32/autostart.py`
 
 **Step 1:** Implement
 
 ```python
-# src/platform/autostart.py
+# src/win32/autostart.py
 from __future__ import annotations
 
 import os
@@ -2897,7 +2897,7 @@ menu.addAction(a_autostart)
 **Step 3:** Verify
 
 ```bash
-uv run python -c "from src.platform.autostart import is_enabled, enable; print('before:', is_enabled()); print('enable:', enable()); print('after:', is_enabled())"
+uv run python -c "from src.win32.autostart import is_enabled, enable; print('before:', is_enabled()); print('enable:', enable()); print('after:', is_enabled())"
 ```
 
 Expected: shows before/after states. Disable afterward for clean dev state.
@@ -3201,7 +3201,7 @@ Total: **16 phases, ~32 tasks, ~160 bite-sized steps**.
 Critical files:
 - `src/collector/session_parser.py` — the data-layer brain
 - `src/ui/main_window.py` — the UX brain
-- `src/platform/windows_focus.py` — the OS-integration glue
+- `src/win32/windows_focus.py` — the OS-integration glue
 - `claude_dashboard.py` — the entrypoint
 
 Run order: Phase 1 → 16, with frequent commits after each task.
