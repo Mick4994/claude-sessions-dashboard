@@ -15,7 +15,7 @@ from .session_scanner import discover_jsonl_files, last_entry_timestamp
 class SessionCollector(QObject):
     """Polls ~/.claude/projects for active sessions, emits updates on a timer."""
 
-    sessionsChanged = Signal(list)  # list[Session]
+    sessionsChanged = Signal(list)  # list[Session]  # noqa: N815
 
     def __init__(
         self,

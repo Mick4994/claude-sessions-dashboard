@@ -1,0 +1,195 @@
+# ruff: noqa: N802
+"""Frameless always-on-top window with hover expand/collapse, edge snap, and drag."""
+
+from __future__ import annotations
+
+from PySide6.QtCore import QPropertyAnimation, Qt, QTimer
+from PySide6.QtWidgets import (
+    QApplication,
+    QHBoxLayout,
+    QMainWindow,
+    QVBoxLayout,
+    QWidget,
+)
+
+from ..collector.models import Session
+from .card_widget import SessionCard
+from .indicator_widget import IndicatorDot
+from .signal_bus import signalBus
+
+
+class MainWindow(QMainWindow):
+    COLLAPSED_WIDTH = 40
+    EXPANDED_WIDTH = 280
+    CARD_HEIGHT = 78
+    CARD_SPACING = 6
+    PADDING = 8
+    INDICATOR_ROW = 22
+
+    def __init__(self, *, expand_delay_ms: int = 200, collapse_delay_ms: int = 500) -> None:
+        super().__init__()
+        self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool)
+        self.setAttribute(Qt.WA_TranslucentBackground, True)
+
+        self._sessions: list[Session] = []
+        self._expanded = False
+        self._current_width = self.COLLAPSED_WIDTH
+        self._dragging = False
+        self._drag_offset = Qt.QPoint()
+
+        self._container = QWidget(self)
+        self._container.setObjectName("container")
+        self._container.setStyleSheet(
+            "#container { background: rgba(20, 20, 24, 0.80); border-radius: 8px; }"
+        )
+        self._inner = QVBoxLayout(self._container)
+        self._inner.setContentsMargins(self.PADDING, self.PADDING, self.PADDING, self.PADDING)
+        self._inner.setSpacing(self.CARD_SPACING)
+
+        self.setCentralWidget(self._container)
+        self.resize(self.COLLAPSED_WIDTH, 200)
+        self._move_to_right_edge()
+
+        self._expand_timer = QTimer(self)
+        self._expand_timer.setSingleShot(True)
+        self._expand_timer.timeout.connect(self._do_expand)
+        self._collapse_timer = QTimer(self)
+        self._collapse_timer.setSingleShot(True)
+        self._collapse_timer.timeout.connect(self._do_collapse)
+        self._expand_delay_ms = expand_delay_ms
+        self._collapse_delay_ms = collapse_delay_ms
+
+        self.setMouseTracking(True)
+        self._container.setMouseTracking(True)
+
+    # ---- positioning ----
+    def _move_to_right_edge(self) -> None:
+        screen = QApplication.primaryScreen()
+        if screen is None:
+            return
+        geo = screen.availableGeometry()
+        x = geo.right() - self._current_width
+        y = geo.center().y() - self.height() // 2
+        self.move(x, y)
+
+    # ---- session updates ----
+    def set_sessions(self, sessions: list[Session]) -> None:
+        if len(sessions) > 20:
+            sessions = sessions[:20]
+        self._sessions = sessions
+        self._rebuild()
+        self._fit_height()
+
+    def _fit_height(self) -> None:
+        n = max(1, len(self._sessions))
+        if self._expanded:
+            h = (
+                self.PADDING * 2
+                + len(self._sessions) * self.CARD_HEIGHT
+                + max(0, len(self._sessions) - 1) * self.CARD_SPACING
+            )
+        else:
+            h = self.PADDING * 2 + n * self.INDICATOR_ROW + (n - 1) * 4
+        h = max(60, h)
+        self.resize(self._current_width, h)
+        self._move_to_right_edge()
+
+    # ---- rebuild contents ----
+    def _clear_inner(self) -> None:
+        while self._inner.count():
+            item = self._inner.takeAt(0)
+            w = item.widget()
+            if w is not None:
+                w.setParent(None)
+                w.deleteLater()
+
+    def _rebuild(self) -> None:
+        self._clear_inner()
+        if self._expanded:
+            for s in self._sessions:
+                card = SessionCard(s)
+                card.clicked.connect(signalBus.cardClicked.emit)
+                self._inner.addWidget(card)
+        else:
+            for s in self._sessions:
+                row = QWidget()
+                row.setFixedHeight(self.INDICATOR_ROW)
+                hl = QHBoxLayout(row)
+                hl.setContentsMargins(0, 0, 0, 0)
+                hl.addStretch(1)
+                dot = IndicatorDot(s.status, size_px=12)
+                dot.setToolTip(
+                    f"{s.title or '(untitled)'}\n{s.subtitle or ''}\n{int(s.context_pct)}%"
+                )
+                hl.addWidget(dot)
+                hl.addStretch(1)
+                self._inner.addWidget(row)
+        self._inner.addStretch(0)
+
+    # ---- hover expand/collapse ----
+    def enterEvent(self, _ev) -> None:
+        self._collapse_timer.stop()
+        self._expand_timer.start(self._expand_delay_ms)
+
+    def leaveEvent(self, _ev) -> None:
+        self._expand_timer.stop()
+        self._collapse_timer.start(self._collapse_delay_ms)
+
+    def _do_expand(self) -> None:
+        if self._expanded:
+            return
+        self._expanded = True
+        self._rebuild()
+        self._animate_width(self.COLLAPSED_WIDTH, self.EXPANDED_WIDTH, 180)
+
+    def _do_collapse(self) -> None:
+        if not self._expanded:
+            return
+        self._expanded = False
+        self._rebuild()
+        self._animate_width(self.EXPANDED_WIDTH, self.COLLAPSED_WIDTH, 180)
+
+    def _animate_width(self, _from: int, to: int, duration_ms: int) -> None:
+        rect = self.geometry()
+        dx = to - self._current_width
+        end_rect = rect.adjusted(0, 0, dx, 0)
+        if dx != 0:
+            end_rect.setX(rect.x() - dx)
+        self._current_width = to
+        anim = QPropertyAnimation(self, b"geometry")
+        anim.setDuration(duration_ms)
+        anim.setStartValue(rect)
+        anim.setEndValue(end_rect)
+        anim.start()
+        QTimer.singleShot(duration_ms + 50, self._fit_height)
+
+    # ---- drag + edge snap ----
+    def mousePressEvent(self, ev) -> None:
+        if ev.button() == Qt.LeftButton:
+            self._dragging = True
+            self._drag_offset = ev.globalPosition().toPoint() - self.frameGeometry().topLeft()
+            ev.accept()
+
+    def mouseMoveEvent(self, ev) -> None:
+        if self._dragging and (ev.buttons() & Qt.LeftButton):
+            new_pos = ev.globalPosition().toPoint() - self._drag_offset
+            self.move(new_pos)
+            ev.accept()
+
+    def mouseReleaseEvent(self, ev) -> None:
+        if ev.button() == Qt.LeftButton and self._dragging:
+            self._dragging = False
+            self._maybe_snap()
+            ev.accept()
+
+    def _maybe_snap(self) -> None:
+        screen = QApplication.primaryScreen()
+        if screen is None:
+            return
+        geo = screen.availableGeometry()
+        snap = 30
+        x = self.x()
+        if abs(geo.right() - (x + self.width())) < snap:
+            self.move(geo.right() - self.width(), self.y())
+        elif abs(geo.left() - x) < snap:
+            self.move(geo.left(), self.y())
