@@ -51,10 +51,7 @@ exe = EXE(
 
 def main() -> int:
     icon_path = ROOT / "claude-status.ico"
-    if icon_path.exists():
-        icon_repr = repr(str(icon_path))
-    else:
-        icon_repr = "None"
+    icon_repr = repr(str(icon_path)) if icon_path.exists() else "None"
     spec_text = SPEC.format(
         script=str(ROOT / "claude_dashboard.py").replace("\\", "\\\\"),
         root=str(ROOT).replace("\\", "\\\\"),

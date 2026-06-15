@@ -3,7 +3,7 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import QPropertyAnimation, Qt, QTimer
+from PySide6.QtCore import QPoint, QPropertyAnimation, Qt, QTimer
 from PySide6.QtWidgets import (
     QApplication,
     QHBoxLayout,
@@ -35,7 +35,7 @@ class MainWindow(QMainWindow):
         self._expanded = False
         self._current_width = self.COLLAPSED_WIDTH
         self._dragging = False
-        self._drag_offset = Qt.QPoint()
+        self._drag_offset = QPoint()
 
         self._container = QWidget(self)
         self._container.setObjectName("container")

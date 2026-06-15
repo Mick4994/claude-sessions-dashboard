@@ -39,13 +39,19 @@ class Config:
             for k, v in kv.items():
                 if k in fmap:
                     target = fmap[k]
-                    if target.type is bool:
-                        flat[k] = str(v).lower() in ("1", "true", "yes", "on")
-                    elif target.type is int:
-                        flat[k] = int(v)
-                    elif target.type is float:
-                        flat[k] = float(v)
-                    else:
+                    # Coerce by default value type (annotations may be strings under
+                    # `from __future__ import annotations`).
+                    try:
+                        default = target.default
+                        if isinstance(default, bool):
+                            flat[k] = str(v).lower() in ("1", "true", "yes", "on")
+                        elif isinstance(default, int):
+                            flat[k] = int(v)
+                        elif isinstance(default, float):
+                            flat[k] = float(v)
+                        else:
+                            flat[k] = v
+                    except AttributeError:
                         flat[k] = v
         return cls(**flat)
 
