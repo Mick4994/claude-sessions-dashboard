@@ -66,15 +66,19 @@ class SessionCollector(QObject):
     def scan_once(self) -> None:
         now = time.time()
 
-        # Process-based: show sessions whose CWD has a running CC process
+        # Process-based: show sessions whose project directory matches a running CC CWD.
+        # CC encodes paths by replacing : and \ with -, e.g. "A:\Users\Mick4994" → "A--Users-Mick4994"
         running_cwds: set[str] = set()
+        running_encoded: set[str] = set()
         try:
             for c in alive_cwds():
-                running_cwds.add(str(Path(c).resolve()))
+                raw = str(Path(c).resolve())
+                running_cwds.add(raw)
+                running_encoded.add(raw.replace(":", "-").replace("\\", "-"))
         except Exception:
             pass
 
-        # Grace period: sessions active in the last 5min that had a CC process
+        # Grace period: keep recently-active sessions visible briefly after CC exits
         grace_cutoff = now - max(300, self._recent_seconds)
 
         seen_ids: set[str] = set()
@@ -94,8 +98,10 @@ class SessionCollector(QObject):
             except Exception:
                 continue
 
-            cwd_parts = str(Path(session.cwd).resolve())
-            show = cwd_parts in running_cwds or session.last_activity_ts > grace_cutoff
+            # Match: project dir name ←→ encoded CC CWD
+            proj_name = jsonl.parent.name
+            cwd_match = proj_name in running_encoded or str(Path(session.cwd).resolve()) in running_cwds
+            show = cwd_match or session.last_activity_ts > grace_cutoff
 
             if not show:
                 continue
