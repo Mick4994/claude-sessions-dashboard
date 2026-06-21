@@ -1,26 +1,45 @@
-"""Tests for indicator widget — color mapping + blinking dot."""
+"""Tests for indicator widget — 4-state color mapping + WORKING-only blink (Phase 3)."""
 from PySide6.QtGui import QColor
 
 from src.collector.models import SessionStatus
 from src.ui.indicator_widget import IndicatorDot, status_blink_ms, status_color
 
 
-def test_status_color_mapping():
-    assert status_color(SessionStatus.WORKING) == QColor("#EAB308")   # yellow
-    assert status_color(SessionStatus.IDLE) == QColor("#22C55E")      # green
-    assert status_color(SessionStatus.PERMISSION) == QColor("#EF4444")# red
-    assert status_color(SessionStatus.ERROR) == QColor("#EF4444")     # red (fallback)
-    assert status_color(SessionStatus.STALE) == QColor("#6B7280")     # gray
+# TC-011: 4-state color map (UNKNOWN/IDLE/WORKING/PERMISSION).
+def test_color_unknown_is_gray():
+    assert status_color(SessionStatus.UNKNOWN) == QColor("#9CA3AF")
 
 
-def test_status_blink_ms():
-    assert status_blink_ms(SessionStatus.WORKING) == 1000  # yellow blink 1Hz
-    assert status_blink_ms(SessionStatus.ERROR) == 0       # no longer blinks
+def test_color_idle_is_green():
+    assert status_color(SessionStatus.IDLE) == QColor("#22C55E")
+
+
+def test_color_working_is_yellow():
+    assert status_color(SessionStatus.WORKING) == QColor("#EAB308")
+
+
+def test_color_permission_is_red():
+    assert status_color(SessionStatus.PERMISSION) == QColor("#EF4444")
+
+
+# TC-019: only WORKING blinks.
+def test_blink_only_for_working():
+    assert status_blink_ms(SessionStatus.WORKING) == 1000
+
+
+def test_no_blink_for_idle():
     assert status_blink_ms(SessionStatus.IDLE) == 0
+
+
+def test_no_blink_for_permission():
     assert status_blink_ms(SessionStatus.PERMISSION) == 0
-    assert status_blink_ms(SessionStatus.STALE) == 0
 
 
+def test_no_blink_for_unknown():
+    assert status_blink_ms(SessionStatus.UNKNOWN) == 0
+
+
+# Widget integration
 def test_indicator_dot_creation(qapp):
     dot = IndicatorDot(SessionStatus.IDLE, size_px=12)
     dot.show()
@@ -36,3 +55,14 @@ def test_indicator_dot_status_change(qapp):
     dot.show()
     qapp.processEvents()
     assert dot._period_ms == 1000
+
+
+def test_indicator_dot_switch_to_non_blinking_stops_timer(qapp):
+    """Switching away from WORKING must stop the blink timer."""
+    dot = IndicatorDot(SessionStatus.WORKING, size_px=12)
+    qapp.processEvents()
+    assert dot._timer is not None
+    dot.set_status(SessionStatus.IDLE)
+    qapp.processEvents()
+    assert dot._timer is None
+    assert dot._period_ms == 0

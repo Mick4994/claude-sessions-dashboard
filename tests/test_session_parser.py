@@ -1,14 +1,15 @@
-"""Tests for session_parser — title, context %, subtitle, status, and full metadata."""
+"""Tests for session_parser — title, context %, subtitle, and full metadata.
+
+NOTE: _determine_status tests removed (function deleted in Phase 3 refactor).
+Status is now driven by SessionRegistry updates from CC hooks.
+"""
 
 from __future__ import annotations
 
 import json
-import time
-from datetime import UTC
 
 from src.collector.models import SessionStatus
 from src.collector.session_parser import (
-    _determine_status,
     _parse_context_pct,
     _parse_subtitle,
     _parse_title,
@@ -20,22 +21,6 @@ def _write_jsonl(path, entries):
     with open(path, "w", encoding="utf-8") as f:
         for e in entries:
             f.write(json.dumps(e) + "\n")
-
-
-def _assistant_tool_use(name, input_, *, tid="t1"):
-    return {
-        "type": "assistant",
-        "message": {
-            "role": "assistant",
-            "content": [{"type": "tool_use", "id": tid, "name": name, "input": input_}],
-        },
-    }
-
-
-def _iso(epoch):
-    from datetime import datetime
-
-    return datetime.fromtimestamp(epoch, tz=UTC).isoformat().replace("+00:00", "Z")
 
 
 # ---- Title ----------------------------------------------------------
@@ -56,7 +41,7 @@ def test_parse_title_falls_back_to_first_user_prompt_truncated():
         {"type": "user", "message": {"role": "user", "content": long}, "sessionId": "s"},
     ]
     title = _parse_title(entries, max_chars=32)
-    assert title == "x" * 32 + "\u2026"
+    assert title == "x" * 32 + "…"
 
 
 def test_parse_title_falls_back_to_cwd_basename():
@@ -147,6 +132,16 @@ def test_context_pct_no_assistant_returns_0():
 # ---- Subtitle -------------------------------------------------------
 
 
+def _assistant_tool_use(name: str, input_: dict, *, tid: str = "t1") -> dict:
+    return {
+        "type": "assistant",
+        "message": {
+            "role": "assistant",
+            "content": [{"type": "tool_use", "id": tid, "name": name, "input": input_}],
+        },
+    }
+
+
 def test_subtitle_edit_shows_filename():
     e = _assistant_tool_use("Edit", {"file_path": "/repo/src/claude_dashboard.py"})
     assert _parse_subtitle([e], max_chars=40) == "Edit: claude_dashboard.py"
@@ -196,232 +191,59 @@ def test_subtitle_fallback_idle_no_tool():
     assert _parse_subtitle([], max_chars=40, idle=True) == "Idle"
 
 
-# ---- Status ---------------------------------------------------------
-
-
-def test_status_working_recent_assistant():
-    now = time.time()
-    entries = [{"type": "assistant", "timestamp": _iso(now - 2)}]
-    assert _determine_status(entries, now=now, recent_seconds=60) == SessionStatus.WORKING
-
-
-def test_status_idle_assistant_end_turn_recent():
-    now = time.time()
-    entries = [{"type": "assistant", "stop_reason": "end_turn", "timestamp": _iso(now - 10)}]
-    assert _determine_status(entries, now=now, recent_seconds=60) == SessionStatus.IDLE
-
-
-def test_status_permission_tool_use_awaiting_result():
-    now = time.time()
-    entries = [
-        {
-            "type": "assistant",
-            "stop_reason": "tool_use",
-            "timestamp": _iso(now - 3),
-            "message": {
-                "content": [
-                    {"type": "tool_use", "id": "t1", "name": "Bash", "input": {"command": "x"}}
-                ]
-            },
-        }
-    ]
-    assert _determine_status(entries, now=now, recent_seconds=60) == SessionStatus.PERMISSION
-
-
-def test_status_idle_tool_use_with_result_then_stale_assistant():
-    """Once all tools have results and the next assistant message is older than recency,
-    the session is IDLE — but only if the assistant hasn't continued within the window."""
-    now = time.time()
-    entries = [
-        {
-            "type": "assistant",
-            "stop_reason": "tool_use",
-            "timestamp": _iso(now - 120),
-            "message": {
-                "content": [
-                    {"type": "tool_use", "id": "t1", "name": "Bash", "input": {"command": "x"}}
-                ]
-            },
-        },
-        {
-            "type": "user",
-            "timestamp": _iso(now - 30),
-            "message": {"content": [{"type": "tool_result", "tool_use_id": "t1", "content": "ok"}]},
-        },
-    ]
-    # The latest entry is a tool_result within recency → agent is processing it → WORKING
-    assert _determine_status(entries, now=now, recent_seconds=60) == SessionStatus.WORKING
-
-
-def test_status_working_recent_tool_result_with_old_assistant():
-    """When the most recent entry is a tool_result (even if assistant is older),
-    the agent is currently processing the tool output → WORKING."""
-    now = time.time()
-    entries = [
-        {
-            "type": "assistant",
-            "stop_reason": "tool_use",
-            "timestamp": _iso(now - 90),
-            "message": {
-                "content": [
-                    {"type": "tool_use", "id": "t1", "name": "Read", "input": {"path": "x"}}
-                ]
-            },
-        },
-        {
-            "type": "user",
-            "timestamp": _iso(now - 5),
-            "message": {"content": [{"type": "tool_result", "tool_use_id": "t1", "content": "ok"}]},
-        },
-    ]
-    assert _determine_status(entries, now=now, recent_seconds=60) == SessionStatus.WORKING
-
-
-def test_status_stale_old_tool_result():
-    """Old tool_result (180s ago, > recent_seconds 60s) → STALE.
-    The collector converts STALE → IDLE inside its visible window, but the
-    parser's job is to flag STALE truthfully based on recency alone."""
-    now = time.time()
-    entries = [
-        {
-            "type": "assistant",
-            "stop_reason": "tool_use",
-            "timestamp": _iso(now - 200),
-            "message": {
-                "content": [
-                    {"type": "tool_use", "id": "t1", "name": "Read", "input": {"path": "x"}}
-                ]
-            },
-        },
-        {
-            "type": "user",
-            "timestamp": _iso(now - 180),
-            "message": {"content": [{"type": "tool_result", "tool_use_id": "t1", "content": "ok"}]},
-        },
-    ]
-    assert _determine_status(entries, now=now, recent_seconds=60) == SessionStatus.STALE
-
-
-def test_status_idle_user_prompt_recent():
-    now = time.time()
-    entries = [{"type": "user", "timestamp": _iso(now - 2)}]
-    assert _determine_status(entries, now=now, recent_seconds=60) == SessionStatus.IDLE
-
-
-def test_status_permission_risky_tool_in_default_mode():
-    """Pending Bash in default mode without result → PERMISSION."""
-    now = time.time()
-    entries = [
-        {"type": "permission-mode", "permissionMode": "default"},
-        {
-            "type": "assistant",
-            "stop_reason": "tool_use",
-            "timestamp": _iso(now - 3),
-            "message": {
-                "content": [
-                    {"type": "tool_use", "id": "t1", "name": "Bash", "input": {"command": "rm"}}
-                ]
-            },
-        },
-    ]
-    assert _determine_status(entries, now=now, recent_seconds=60) == SessionStatus.PERMISSION
-
-
-def test_status_working_risky_tool_in_auto_mode():
-    """Pending Bash in auto mode without result → WORKING (auto-executes)."""
-    now = time.time()
-    entries = [
-        {"type": "permission-mode", "permissionMode": "auto"},
-        {
-            "type": "assistant",
-            "stop_reason": "tool_use",
-            "timestamp": _iso(now - 3),
-            "message": {
-                "content": [
-                    {"type": "tool_use", "id": "t1", "name": "Bash", "input": {"command": "ls"}}
-                ]
-            },
-        },
-    ]
-    assert _determine_status(entries, now=now, recent_seconds=60) == SessionStatus.WORKING
-
-
-def test_status_working_safe_tool_in_default_mode():
-    """Pending Read in default mode without result → WORKING (safe tool, no permission needed)."""
-    now = time.time()
-    entries = [
-        {"type": "permission-mode", "permissionMode": "default"},
-        {
-            "type": "assistant",
-            "stop_reason": "tool_use",
-            "timestamp": _iso(now - 3),
-            "message": {
-                "content": [
-                    {"type": "tool_use", "id": "t1", "name": "Read", "input": {"path": "x"}}
-                ]
-            },
-        },
-    ]
-    assert _determine_status(entries, now=now, recent_seconds=60) == SessionStatus.WORKING
-
-
-def test_status_stale_no_recent_activity():
-    now = time.time()
-    entries = [{"type": "assistant", "timestamp": _iso(now - 300)}]
-    assert _determine_status(entries, now=now, recent_seconds=60) == SessionStatus.STALE
-
-
 # ---- Full metadata --------------------------------------------------
 
 
-def test_parse_session_metadata_full(tmp_path):
+def test_parse_session_metadata_status_defaults_to_unknown(tmp_path):
+    """TC-008: status must NOT be inferred from JSONL — always defaults to UNKNOWN
+    so the registry owns the only path to status changes."""
     p = tmp_path / "s.jsonl"
-    now = time.time()
-    ts0 = _iso(now - 5)
-    ts1 = _iso(now - 4)
-    ts2 = _iso(now - 3)
     entries = [
-        {"type": "last-prompt", "sessionId": "s", "timestamp": ts0},
-        {"type": "ai-title", "aiTitle": "Build dashboard", "sessionId": "s"},
-        {
-            "type": "user",
-            "message": {"role": "user", "content": "build"},
-            "timestamp": ts1,
-            "sessionId": "s",
-        },
-        {
-            "type": "assistant",
-            "message": {
-                "role": "assistant",
-                "content": [
-                    {
-                        "type": "tool_use",
-                        "id": "t1",
-                        "name": "Edit",
-                        "input": {"file_path": "/repo/src/main.py"},
-                    }
-                ],
-                "usage": {
-                    "input_tokens": 5000,
-                    "cache_creation_input_tokens": 0,
-                    "cache_read_input_tokens": 30000,
-                    "output_tokens": 200,
-                },
-            },
-            "stop_reason": "tool_use",
-            "timestamp": ts2,
-            "sessionId": "s",
-            "cwd": "/repo",
-        },
+        {"type": "ai-title", "aiTitle": "T", "sessionId": "s"},
+        # Even with a recent permission-mode + pending tool_use, parser must NOT
+        # flip status — the registry is the sole source of truth.
+        {"type": "permission-mode", "permissionMode": "default"},
+        _assistant_tool_use("Bash", {"command": "rm -rf /"}),
     ]
-    p.write_text("\n".join(json.dumps(e) for e in entries) + "\n")
+    _write_jsonl(p, entries)
     s = parse_session_metadata(
         jsonl_path=p, session_id="s", cwd="/repo", max_tokens=200_000, title_max=32, subtitle_max=40
     )
-    assert s.title == "Build dashboard"
-    assert s.subtitle == "Edit: main.py"
-    assert s.context_pct == 17.5
-    assert s.status == SessionStatus.PERMISSION
+    assert s.status == SessionStatus.UNKNOWN
+
+
+def test_parse_session_metadata_no_recent_seconds_param(tmp_path):
+    """TC-008: parse_session_metadata signature must not accept recent_seconds
+    or stale_after_minutes (they were removed in Phase 3)."""
+    p = tmp_path / "s.jsonl"
+    entries = [{"type": "ai-title", "aiTitle": "X", "sessionId": "s"}]
+    _write_jsonl(p, entries)
+    import inspect
+
+    sig = inspect.signature(parse_session_metadata)
+    assert "recent_seconds" not in sig.parameters
+    assert "stale_after_minutes" not in sig.parameters
+    # Still parses successfully
+    s = parse_session_metadata(
+        jsonl_path=p, session_id="s", cwd="/repo", max_tokens=200_000, title_max=32, subtitle_max=40
+    )
+    assert s.title == "X"
+
+
+def test_corrupt_jsonl_line_skipped_no_crash(tmp_path):
+    """TC-022: a single bad JSONL line must not crash parsing."""
+    p = tmp_path / "s.jsonl"
+    # Mix good lines, blank lines, and a corrupt line.
+    with open(p, "w", encoding="utf-8") as f:
+        f.write(json.dumps({"type": "ai-title", "aiTitle": "Survivor", "sessionId": "s"}) + "\n")
+        f.write("{not valid json\n")
+        f.write("\n")
+        f.write(json.dumps(_assistant_tool_use("Read", {"file_path": "/x.py"})) + "\n")
+    s = parse_session_metadata(
+        jsonl_path=p, session_id="s", cwd="/repo", max_tokens=200_000, title_max=32, subtitle_max=40
+    )
+    assert s.title == "Survivor"
+    assert "Read" in s.subtitle
 
 
 def test_parse_session_metadata_uses_tail_only(tmp_path):
@@ -434,3 +256,9 @@ def test_parse_session_metadata_uses_tail_only(tmp_path):
         jsonl_path=p, session_id="s", cwd="x", max_tokens=200_000, title_max=32, subtitle_max=40
     )
     assert s.title == "Real Title"
+
+
+# Helper for tests that build a single assistant tool_use entry.
+# (kept here so existing imports work in both directions)
+def _assistant_tool_use_default(*args, **kwargs):
+    return _assistant_tool_use(*args, **kwargs)
