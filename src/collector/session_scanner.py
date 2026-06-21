@@ -6,16 +6,21 @@ from datetime import datetime
 from pathlib import Path
 
 _SKIP_DIR_NAMES = {"tool-results"}
+# Encoded names of project dirs that are plugin-internal (not user sessions).
+# claude-mem observer writes JSONLs here — these must not appear as user sessions.
+_SKIP_DIR_SUBSTRINGS = ("claude-mem-observer-sessions",)
 
 
 def discover_jsonl_files(projects_dir: Path) -> Iterator[Path]:
     """Yield all *.jsonl files directly under projects_dir/<*>/*.jsonl.
-    Skips CC's per-session tool-results/ subdirs.
+    Skips CC's per-session tool-results/ subdirs and plugin-internal project dirs.
     """
     if not projects_dir.exists():
         return
     for project_dir in projects_dir.iterdir():
         if not project_dir.is_dir():
+            continue
+        if any(pat in project_dir.name for pat in _SKIP_DIR_SUBSTRINGS):
             continue
         for entry in project_dir.iterdir():
             if entry.is_file() and entry.suffix == ".jsonl":

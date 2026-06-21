@@ -199,6 +199,10 @@ def _parse_subtitle(
 
 # ---- Status -----------------------------------------------------------------
 
+# Tools that require user approval in default (non-auto) permission mode.
+# Auto mode runs these without prompting, so they only count as WORKING there.
+_PERMISSION_TOOLS = {"Bash", "Write", "Edit", "MultiEdit", "NotebookEdit", "WebFetch"}
+
 
 def _gather_tool_use_ids(entries: list[dict]) -> set[str]:
     ids: set[str] = set()
@@ -232,6 +236,53 @@ def _gather_tool_result_ids(entries: list[dict]) -> set[str]:
     return ids
 
 
+def _gather_pending_tool_names(entries: list[dict]) -> set[str]:
+    """Names of tool_uses that don't yet have a tool_result."""
+    use_ids = _gather_tool_use_ids(entries)
+    res_ids = _gather_tool_result_ids(entries)
+    pending_ids = use_ids - res_ids
+    names: set[str] = set()
+    for e in entries:
+        if e.get("type") != "assistant":
+            continue
+        content = (e.get("message") or {}).get("content") or []
+        if not isinstance(content, list):
+            continue
+        for b in content:
+            if isinstance(b, dict) and b.get("type") == "tool_use":
+                if b.get("id") in pending_ids:
+                    name = b.get("name")
+                    if isinstance(name, str):
+                        names.add(name)
+    return names
+
+
+def _permission_mode(entries: list[dict]) -> str:
+    """Return the session's permission mode ('auto' | 'default' | 'plan' | ...).
+    Defaults to 'default' if the header entry is not in the read window — safer
+    to assume permission may be needed than to silently drop PERMISSION."""
+    for e in entries:
+        if e.get("type") == "permission-mode":
+            mode = e.get("permissionMode")
+            if isinstance(mode, str):
+                return mode
+    return "default"
+
+
+def _has_tool_result_recent(entries: list[dict]) -> bool:
+    """True if the most recent user entry contains a tool_result block."""
+    for e in reversed(entries):
+        if e.get("type") == "user":
+            content = (e.get("message") or {}).get("content") or []
+            if isinstance(content, list):
+                return any(
+                    isinstance(b, dict) and b.get("type") == "tool_result"
+                    for b in content
+                )
+            return False
+    return False
+
+
 def _determine_status(
     entries: list[dict],
     *,
@@ -240,24 +291,39 @@ def _determine_status(
 ) -> SessionStatus:
     if not entries:
         return SessionStatus.STALE
+
     last = entries[-1]
-    last_type = last.get("type")
     last_ts = _entry_ts(last)
     if last_ts is None or (now - last_ts) > recent_seconds:
         return SessionStatus.STALE
+
+    last_type = last.get("type")
+
     if last_type == "assistant":
         stop_reason = last.get("stop_reason")
         if stop_reason == "tool_use":
-            use_ids = _gather_tool_use_ids(entries)
-            res_ids = _gather_tool_result_ids(entries)
-            if use_ids - res_ids:
-                return SessionStatus.PERMISSION
+            pending = _gather_pending_tool_names(entries)
+            if pending:
+                # Auto mode auto-executes risky tools — never PERMISSION there.
+                # Default (or unknown) mode: risky tool pending = permission requested.
+                perm_mode = _permission_mode(entries)
+                if perm_mode != "auto" and pending & _PERMISSION_TOOLS:
+                    return SessionStatus.PERMISSION
+                return SessionStatus.WORKING
+            # Tool use + result already in tail → agent waiting for next prompt.
             return SessionStatus.IDLE
         if stop_reason == "end_turn":
             return SessionStatus.IDLE
+        # No stop_reason yet → assistant is still streaming.
         return SessionStatus.WORKING
+
     if last_type == "user":
+        # tool_result = a tool just completed; agent is processing the output → WORKING.
+        # Plain user text = waiting for agent to pick it up → IDLE.
+        if _has_tool_result_recent(entries):
+            return SessionStatus.WORKING
         return SessionStatus.IDLE
+
     return SessionStatus.IDLE
 
 

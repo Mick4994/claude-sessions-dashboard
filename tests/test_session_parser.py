@@ -228,13 +228,15 @@ def test_status_permission_tool_use_awaiting_result():
     assert _determine_status(entries, now=now, recent_seconds=60) == SessionStatus.PERMISSION
 
 
-def test_status_idle_tool_use_with_result():
+def test_status_idle_tool_use_with_result_then_stale_assistant():
+    """Once all tools have results and the next assistant message is older than recency,
+    the session is IDLE — but only if the assistant hasn't continued within the window."""
     now = time.time()
     entries = [
         {
             "type": "assistant",
             "stop_reason": "tool_use",
-            "timestamp": _iso(now - 5),
+            "timestamp": _iso(now - 120),
             "message": {
                 "content": [
                     {"type": "tool_use", "id": "t1", "name": "Bash", "input": {"command": "x"}}
@@ -243,17 +245,124 @@ def test_status_idle_tool_use_with_result():
         },
         {
             "type": "user",
-            "timestamp": _iso(now - 1),
+            "timestamp": _iso(now - 30),
             "message": {"content": [{"type": "tool_result", "tool_use_id": "t1", "content": "ok"}]},
         },
     ]
-    assert _determine_status(entries, now=now, recent_seconds=60) == SessionStatus.IDLE
+    # The latest entry is a tool_result within recency → agent is processing it → WORKING
+    assert _determine_status(entries, now=now, recent_seconds=60) == SessionStatus.WORKING
+
+
+def test_status_working_recent_tool_result_with_old_assistant():
+    """When the most recent entry is a tool_result (even if assistant is older),
+    the agent is currently processing the tool output → WORKING."""
+    now = time.time()
+    entries = [
+        {
+            "type": "assistant",
+            "stop_reason": "tool_use",
+            "timestamp": _iso(now - 90),
+            "message": {
+                "content": [
+                    {"type": "tool_use", "id": "t1", "name": "Read", "input": {"path": "x"}}
+                ]
+            },
+        },
+        {
+            "type": "user",
+            "timestamp": _iso(now - 5),
+            "message": {"content": [{"type": "tool_result", "tool_use_id": "t1", "content": "ok"}]},
+        },
+    ]
+    assert _determine_status(entries, now=now, recent_seconds=60) == SessionStatus.WORKING
+
+
+def test_status_stale_old_tool_result():
+    """Old tool_result (180s ago, > recent_seconds 60s) → STALE.
+    The collector converts STALE → IDLE inside its visible window, but the
+    parser's job is to flag STALE truthfully based on recency alone."""
+    now = time.time()
+    entries = [
+        {
+            "type": "assistant",
+            "stop_reason": "tool_use",
+            "timestamp": _iso(now - 200),
+            "message": {
+                "content": [
+                    {"type": "tool_use", "id": "t1", "name": "Read", "input": {"path": "x"}}
+                ]
+            },
+        },
+        {
+            "type": "user",
+            "timestamp": _iso(now - 180),
+            "message": {"content": [{"type": "tool_result", "tool_use_id": "t1", "content": "ok"}]},
+        },
+    ]
+    assert _determine_status(entries, now=now, recent_seconds=60) == SessionStatus.STALE
 
 
 def test_status_idle_user_prompt_recent():
     now = time.time()
     entries = [{"type": "user", "timestamp": _iso(now - 2)}]
     assert _determine_status(entries, now=now, recent_seconds=60) == SessionStatus.IDLE
+
+
+def test_status_permission_risky_tool_in_default_mode():
+    """Pending Bash in default mode without result → PERMISSION."""
+    now = time.time()
+    entries = [
+        {"type": "permission-mode", "permissionMode": "default"},
+        {
+            "type": "assistant",
+            "stop_reason": "tool_use",
+            "timestamp": _iso(now - 3),
+            "message": {
+                "content": [
+                    {"type": "tool_use", "id": "t1", "name": "Bash", "input": {"command": "rm"}}
+                ]
+            },
+        },
+    ]
+    assert _determine_status(entries, now=now, recent_seconds=60) == SessionStatus.PERMISSION
+
+
+def test_status_working_risky_tool_in_auto_mode():
+    """Pending Bash in auto mode without result → WORKING (auto-executes)."""
+    now = time.time()
+    entries = [
+        {"type": "permission-mode", "permissionMode": "auto"},
+        {
+            "type": "assistant",
+            "stop_reason": "tool_use",
+            "timestamp": _iso(now - 3),
+            "message": {
+                "content": [
+                    {"type": "tool_use", "id": "t1", "name": "Bash", "input": {"command": "ls"}}
+                ]
+            },
+        },
+    ]
+    assert _determine_status(entries, now=now, recent_seconds=60) == SessionStatus.WORKING
+
+
+def test_status_working_safe_tool_in_default_mode():
+    """Pending Read in default mode without result → WORKING (safe tool, no permission needed)."""
+    now = time.time()
+    entries = [
+        {"type": "permission-mode", "permissionMode": "default"},
+        {
+            "type": "assistant",
+            "stop_reason": "tool_use",
+            "timestamp": _iso(now - 3),
+            "message": {
+                "content": [
+                    {"type": "tool_use", "id": "t1", "name": "Read", "input": {"path": "x"}}
+                ]
+            },
+        },
+    ]
+    assert _determine_status(entries, now=now, recent_seconds=60) == SessionStatus.WORKING
 
 
 def test_status_stale_no_recent_activity():
