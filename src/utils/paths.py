@@ -34,8 +34,9 @@ def default_config_text() -> str:
     return """\
 [general]
 poll_interval_ms = 2000
-stale_after_minutes = 30
+stale_after_minutes = 1440
 recent_seconds = 60
+hide_after_seconds = 86400
 expand_delay_ms = 200
 collapse_delay_ms = 500
 edge_snap_px = 30

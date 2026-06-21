@@ -1,6 +1,5 @@
 # ruff: noqa: E501, N802
 """Indicator dot widget with color-coded status and blink animation."""
-
 from __future__ import annotations
 
 import time
@@ -11,17 +10,17 @@ from PySide6.QtWidgets import QWidget
 
 from ..collector.models import SessionStatus
 
+# Simplified: 黄闪=工作中  红=请求授权  绿=闲置
 _COLORS: dict[SessionStatus, QColor] = {
-    SessionStatus.WORKING: QColor("#3B82F6"),
-    SessionStatus.IDLE: QColor("#22C55E"),
-    SessionStatus.PERMISSION: QColor("#EAB308"),
-    SessionStatus.ERROR: QColor("#EF4444"),
-    SessionStatus.STALE: QColor("#6B7280"),
+    SessionStatus.WORKING: QColor("#EAB308"),       # yellow
+    SessionStatus.IDLE: QColor("#22C55E"),           # green
+    SessionStatus.PERMISSION: QColor("#EF4444"),     # red
+    SessionStatus.ERROR: QColor("#EF4444"),          # red (fallback)
+    SessionStatus.STALE: QColor("#6B7280"),          # gray (shouldn't be visible)
 }
 
 _BLINK_MS: dict[SessionStatus, int] = {
-    SessionStatus.WORKING: 1000,
-    SessionStatus.ERROR: 700,
+    SessionStatus.WORKING: 1000,   # yellow blink 1Hz
 }
 
 
@@ -38,6 +37,7 @@ class IndicatorDot(QWidget):
 
     def __init__(self, status: SessionStatus, *, size_px: int = 12, parent=None) -> None:
         super().__init__(parent)
+        self.setFixedSize(size_px + 6, size_px + 6)
         self._size_px = size_px
         self._color = status_color(status)
         self._opacity = 1.0
@@ -82,10 +82,12 @@ class IndicatorDot(QWidget):
         c.setAlphaF(max(0.2, min(1.0, self._opacity)))
         p.setBrush(QBrush(c))
         p.setPen(Qt.NoPen)
-        r = self._size_px / 2
-        cx = self.width() / 2
+        w = min(self.width(), self.height())
+        r = w / 2
+        cx = w / 2
         cy = self.height() / 2
         p.drawEllipse(int(cx - r), int(cy - r), int(r * 2), int(r * 2))
+        # inner highlight
         hl = QColor(255, 255, 255, 60)
         p.setBrush(QBrush(hl))
         p.drawEllipse(int(cx - r * 0.55), int(cy - r * 0.7), int(r * 0.6), int(r * 0.45))

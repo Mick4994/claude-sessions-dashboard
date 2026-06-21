@@ -54,6 +54,7 @@ def main() -> int:
     collector = SessionCollector(
         poll_interval_ms=cfg.poll_interval_ms,
         recent_seconds=cfg.recent_seconds,
+        hide_after_seconds=cfg.hide_after_seconds,
         stale_after_minutes=cfg.stale_after_minutes,
         max_context_tokens=cfg.context_max_tokens,
         title_truncate_chars=cfg.title_truncate_chars,

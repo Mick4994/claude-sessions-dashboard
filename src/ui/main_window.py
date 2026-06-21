@@ -6,7 +6,6 @@ from __future__ import annotations
 from PySide6.QtCore import QPoint, QPropertyAnimation, Qt, QTimer
 from PySide6.QtWidgets import (
     QApplication,
-    QHBoxLayout,
     QMainWindow,
     QVBoxLayout,
     QWidget,
@@ -112,18 +111,11 @@ class MainWindow(QMainWindow):
                 self._inner.addWidget(card)
         else:
             for s in self._sessions:
-                row = QWidget()
-                row.setFixedHeight(self.INDICATOR_ROW)
-                hl = QHBoxLayout(row)
-                hl.setContentsMargins(0, 0, 0, 0)
-                hl.addStretch(1)
                 dot = IndicatorDot(s.status, size_px=12)
                 dot.setToolTip(
                     f"{s.title or '(untitled)'}\n{s.subtitle or ''}\n{int(s.context_pct)}%"
                 )
-                hl.addWidget(dot)
-                hl.addStretch(1)
-                self._inner.addWidget(row)
+                self._inner.addWidget(dot, 0, Qt.AlignCenter)
         self._inner.addStretch(0)
 
     # ---- hover expand/collapse ----

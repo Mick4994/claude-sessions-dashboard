@@ -1,5 +1,4 @@
 """Tests for indicator widget — color mapping + blinking dot."""
-
 from PySide6.QtGui import QColor
 
 from src.collector.models import SessionStatus
@@ -7,16 +6,16 @@ from src.ui.indicator_widget import IndicatorDot, status_blink_ms, status_color
 
 
 def test_status_color_mapping():
-    assert status_color(SessionStatus.WORKING) == QColor("#3B82F6")
-    assert status_color(SessionStatus.IDLE) == QColor("#22C55E")
-    assert status_color(SessionStatus.PERMISSION) == QColor("#EAB308")
-    assert status_color(SessionStatus.ERROR) == QColor("#EF4444")
-    assert status_color(SessionStatus.STALE) == QColor("#6B7280")
+    assert status_color(SessionStatus.WORKING) == QColor("#EAB308")   # yellow
+    assert status_color(SessionStatus.IDLE) == QColor("#22C55E")      # green
+    assert status_color(SessionStatus.PERMISSION) == QColor("#EF4444")# red
+    assert status_color(SessionStatus.ERROR) == QColor("#EF4444")     # red (fallback)
+    assert status_color(SessionStatus.STALE) == QColor("#6B7280")     # gray
 
 
 def test_status_blink_ms():
-    assert status_blink_ms(SessionStatus.WORKING) == 1000
-    assert status_blink_ms(SessionStatus.ERROR) == 700
+    assert status_blink_ms(SessionStatus.WORKING) == 1000  # yellow blink 1Hz
+    assert status_blink_ms(SessionStatus.ERROR) == 0       # no longer blinks
     assert status_blink_ms(SessionStatus.IDLE) == 0
     assert status_blink_ms(SessionStatus.PERMISSION) == 0
     assert status_blink_ms(SessionStatus.STALE) == 0

@@ -64,14 +64,14 @@
 | context 占用 | JSONL 内**最后一条 `type=assistant`** 的 `message.usage` | 每 2s |
 | 模型 | 最后一条 `assistant` 的 `message.model` | 每 2s |
 
-### 3.2 活跃判定（双信号）
-一个会话被显示在灯条上当且仅当：
-- **信号 A**：JSONL 文件 mtime 在过去 **N 分钟** 内（默认 30 分钟，可配置）
-- **信号 B**：JSONL 最后一条 entry 的 `timestamp` 在过去 **M 秒** 内（默认 60 秒，可配置）
+### 3.2 活跃判定（进程探活）
+一个会话被显示在灯条上当且仅当**对应的 Claude Code 进程在跑**：
+- **信号**：`psutil.process_iter()` 枚举所有 `node.exe` 进程，匹配命令行含 `claude-code`、`@anthropic-ai/claude-code`、`claude` 的进程
+- **CWD 匹配**：进程工作目录 → JSONL session 的 `cwd` 字段 → 匹配成功
+- **缓冲期**：最近 5 分钟内有活动的 session，即使 CC 进程已退出（刚关闭 CC），也会继续显示 5 分钟
+- **清除**：CC 进程不在跑 + 5 分钟缓冲期已过 → 移除出灯条
 
-只有 A ∧ B 都满足才显示。任一不满足 → 移除出灯条。
-
-> 选双信号的考量：单纯 mtime 会把"CC 进程挂住但不再写盘"的会话误判为活跃；单纯 timestamp 对大文件全量扫尾成本高。先用 mtime 快速过滤候选，再对候选读尾行 timestamp 精确判定。
+> v1 实现用 `psutil` 库；如果没有 psutil（例如 exe 打包），回退到文件 mtime + timestamp 双信号。
 
 ### 3.3 context% 计算
 公式：
@@ -124,19 +124,19 @@ context_pct = round(tokens_now / max_context_tokens * 100)
 
 ## 四、状态机与可视化
 
-### 4.1 状态机（5 色 + 闪烁）
+### 4.1 状态机（3 状态，简化版）
 
 | 状态 | 颜色 | 动效 | 触发条件 |
 |------|------|------|---------|
-| **Working** | 蓝色 `#3B82F6` | **闪烁**（1Hz, ease-in-out） | 末尾 assistant 条目 + 最后一条 entry < 5s |
-| **Idle** | 绿色 `#22C55E` | 常亮 | 末尾 assistant.stop_reason=end_turn 或末尾是 user 条目 |
-| **Permission** | 黄色 `#EAB308` | 常亮 | 末尾 assistant 含 `stop_reason=tool_use` + 紧接着无对应 tool_result（在 tool 5s 内未完成） |
-| **Error** | 红色 `#EF4444` | **闪烁**（0.7Hz, sharp） | 最近 5 分钟内有 `isApiErrorMessage=true` 或 user type=user 但含 error tag |
-| **Stale** | 灰色 `#6B7280` | 不亮 | 进入/即将退出灯条时的过渡态（仅视觉，不持久） |
+| **Working（工作中）** | 黄色 `#EAB308` | **闪烁**（1Hz） | CC 进程在跑 + 最后一条 entry 是 assistant 且 `stop_reason ≠ end_turn` |
+| **Permission（请求授权）** | 红色 `#EF4444` | 常亮 | CC 进程在跑 + assistant 有 `tool_use` 但无对应 `tool_result` |
+| **Idle（闲置）** | 绿色 `#22C55E` | 常亮 | CC 进程在跑 + 最后一条是 user 或 assistant `end_turn` |
+
+> 如果 CC 进程不在跑（且超过 5 分钟缓冲期），直接不显示指示灯——不需要灰色"Stale"状态。
 
 ### 4.2 闪烁实现
-- QTimer 1s 周期驱动 `QGraphicsColorEffect.opacity`，0.5→1.0→0.5
-- Working 闪烁周期 1.0s，Error 闪烁周期 0.7s
+- QTimer 1s 周期驱动 `QGraphicsColorEffect.opacity`，0.55→1.0→0.55
+- Working 闪烁周期 1.0s
 - 收起态也保持闪烁（即使半透明也能看清）
 
 ### 4.3 context% 颜色梯度（独立于状态色）
@@ -216,8 +216,9 @@ context_pct = round(tokens_now / max_context_tokens * 100)
 ```ini
 [general]
 poll_interval_ms = 2000
-stale_after_minutes = 30         # 信号 A 阈值
-recent_seconds = 60              # 信号 B 阈值
+stale_after_minutes = 1440        # v2: 进程探活，此值用于回退
+recent_seconds = 60               # 状态判定窗口：60s 内活动 = WORKING
+hide_after_seconds = 86400        # v2: 回退场景下隐藏阈值 = 24h
 expand_delay_ms = 200
 collapse_delay_ms = 500
 edge_snap_px = 30
@@ -345,3 +346,4 @@ D:/Codes/claude-sessions-dashboard/      ← 本项目（Python/PySide6）
 | 2026-06-15 | 初版需求 | Claude |
 | 2026-06-15 | 新增副标题（当前任务）字段 | Claude |
 | 2026-06-15 | 项目目录改到 D:/Codes/claude-sessions-dashboard/；context_max_tokens 默认改为 1000000（MiniMax-M3 = 1M）；明确 uv 管理依赖 + git 版本控制 + 完整 exe + 任务计划程序自启闭环；JS/Electron 版保留在 D:/Codes/claude-status-dashboard/ 不再参考 | Claude |
+| 2026-06-21 | **v2**: 活跃判定改为进程探活（psutil 检测 CC node.exe 进程 + CWD 匹配），不再依赖 JSONL 文件时间戳；状态机简化为 3 状态（黄闪=工作中 / 红=请求授权 / 绿=闲置）；新增 `hide_after_seconds` 配置字段用于回退 | Claude |

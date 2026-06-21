@@ -4,6 +4,7 @@ version = "0.1.0"
 description = "Floating status bar for active Claude Code sessions"
 requires-python = ">=3.12"
 dependencies = [
+    "psutil>=7.2.2",
     "PySide6>=6.7",
 ]
 

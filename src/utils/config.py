@@ -10,6 +10,7 @@ class Config:
     poll_interval_ms: int = 2000
     stale_after_minutes: int = 30
     recent_seconds: int = 60
+    hide_after_seconds: int = 86400
     expand_delay_ms: int = 200
     collapse_delay_ms: int = 500
     edge_snap_px: int = 30
@@ -62,6 +63,7 @@ class Config:
                 "poll_interval_ms",
                 "stale_after_minutes",
                 "recent_seconds",
+                "hide_after_seconds",
                 "expand_delay_ms",
                 "collapse_delay_ms",
                 "edge_snap_px",
