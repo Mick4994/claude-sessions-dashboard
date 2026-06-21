@@ -8,7 +8,7 @@ from pathlib import Path
 
 from PySide6.QtCore import QObject, QTimer, Signal
 
-from .models import Session
+from .models import Session, SessionStatus
 from .process_monitor import alive_cwds
 from .session_parser import parse_session_metadata
 from .session_scanner import discover_jsonl_files
@@ -66,7 +66,7 @@ class SessionCollector(QObject):
     def scan_once(self) -> None:
         now = time.time()
 
-        # Process-based: show sessions whose project directory matches a running CC CWD.
+        # Process-based: show sessions whose project dir matches a running CC CWD.
         # CC encodes paths by replacing : and \ with -, e.g. "A:\Users\Mick4994" → "A--Users-Mick4994"
         running_cwds: set[str] = set()
         running_encoded: set[str] = set()
@@ -80,11 +80,32 @@ class SessionCollector(QObject):
 
         # Grace period: keep recently-active sessions visible briefly after CC exits
         grace_cutoff = now - max(300, self._recent_seconds)
+        # JSONL recency threshold: only show sessions whose JSONL was touched in this window
+        # (filters out OLD session files in the same project dir)
+        recency_cutoff = now - max(300, self._recent_seconds)
 
         seen_ids: set[str] = set()
 
         for jsonl in discover_jsonl_files(self.projects_dir):
             sid = jsonl.stem
+            try:
+                mtime = jsonl.stat().st_mtime
+            except OSError:
+                continue
+
+            proj_name = jsonl.parent.name
+            cwd_match = proj_name in running_encoded
+
+            # Show only if:
+            # (a) this session's project has a running CC process AND its JSONL was touched recently
+            #     → this is the CURRENT session for that CC, not an old one in the same project
+            # (b) OR session had recent activity (grace period after CC exits)
+            is_current = cwd_match and mtime > recency_cutoff
+            in_grace = mtime > grace_cutoff and not cwd_match  # grace only after CC exit
+
+            if not (is_current or in_grace):
+                continue
+
             try:
                 session = parse_session_metadata(
                     jsonl_path=jsonl,
@@ -98,13 +119,19 @@ class SessionCollector(QObject):
             except Exception:
                 continue
 
-            # Match: project dir name ←→ encoded CC CWD
-            proj_name = jsonl.parent.name
-            cwd_match = proj_name in running_encoded or str(Path(session.cwd).resolve()) in running_cwds
-            show = cwd_match or session.last_activity_ts > grace_cutoff
-
-            if not show:
-                continue
+            # Within visible window, never show STALE — show as IDLE instead
+            if session.status == SessionStatus.STALE:
+                session = Session(
+                    id=session.id,
+                    jsonl_path=session.jsonl_path,
+                    cwd=session.cwd,
+                    title=session.title,
+                    subtitle=session.subtitle,
+                    context_pct=session.context_pct,
+                    model=session.model,
+                    status=SessionStatus.IDLE,
+                    last_activity_ts=session.last_activity_ts,
+                )
 
             seen_ids.add(sid)
             self._sessions[sid] = session

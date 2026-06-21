@@ -1,28 +1,22 @@
-"""Enumerate running Claude Code processes by scanning node.exe (and claude) on Windows."""
+"""Enumerate running Claude Code processes on Windows."""
 from __future__ import annotations
 
 from pathlib import Path
 
-_CC_SIGNATURES = ("claude-code", "@anthropic-ai/claude-code", "/claude", "\\claude")
+# Tightened: only match Claude Code specifically, not any node process with "claude" in path
+_CC_SIGNATURES = ("claude-code", "@anthropic-ai/claude-code")
 
 
 def _is_cc_process(name: str, cmdline: str | None) -> bool:
-    """Heuristic: process name or command line suggests Claude Code."""
     if cmdline is None:
         return False
-    needle = cmdline.lower()
-    for sig in _CC_SIGNATURES:
-        if sig in needle:
-            return True
-    if name.lower() in ("claude.exe", "claude"):
+    if name.lower() == "claude.exe":
         return True
-    return False
+    needle = cmdline.lower()
+    return any(sig in needle for sig in _CC_SIGNATURES)
 
 
 def alive_cwds() -> set[str]:
-    """Return the set of working directories for currently running CC processes.
-    Uses psutil on all platforms; falls back to an empty set on import failure.
-    """
     try:
         import psutil
     except ImportError:
