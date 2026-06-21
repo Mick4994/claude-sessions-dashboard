@@ -83,6 +83,7 @@ def main() -> int:
 
     # -- tray --
     _tray = build_tray(app, window, collector, cfg_path)
+    _tray.showMessage('Claude Sessions Dashboard', 'Started', _tray.Information, 3000)
 
     # -- config reload / pause --
     def on_reload():
