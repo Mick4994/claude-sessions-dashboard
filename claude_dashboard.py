@@ -15,6 +15,7 @@ from PySide6.QtWidgets import QApplication
 from src.collector.collector import SessionCollector
 from src.ui.main_window import MainWindow
 from src.ui.signal_bus import signalBus
+from PySide6.QtWidgets import QSystemTrayIcon
 from src.ui.tray import build_tray
 from src.utils.config import Config
 from src.utils.paths import config_path, default_config_text
@@ -83,7 +84,7 @@ def main() -> int:
 
     # -- tray --
     _tray = build_tray(app, window, collector, cfg_path)
-    _tray.showMessage('Claude Sessions Dashboard', 'Started', _tray.Information, 3000)
+    _tray.showMessage('Claude Sessions Dashboard', 'Started', QSystemTrayIcon.Information, 3000)
 
     # -- config reload / pause --
     def on_reload():
