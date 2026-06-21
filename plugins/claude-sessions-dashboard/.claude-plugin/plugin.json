@@ -1,0 +1,13 @@
+{
+  "name": "claude-sessions-dashboard",
+  "version": "1.0.0",
+  "description": "Floating always-on-top status bar for active Claude Code sessions — color-coded indicator lights (green idle / yellow working / red permission). Process-based session detection + hook-driven status updates.",
+  "author": {
+    "name": "Mick4994",
+    "url": "https://github.com/Mick4994"
+  },
+  "homepage": "https://github.com/Mick4994/claude-sessions-dashboard",
+  "repository": "https://github.com/Mick4994/claude-sessions-dashboard",
+  "license": "MIT",
+  "keywords": ["claude-code", "dashboard", "session", "monitor", "indicator", "windows"]
+}
