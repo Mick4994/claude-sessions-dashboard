@@ -1,15 +1,8 @@
 from dataclasses import dataclass
-from enum import Enum
 
+from src.core.status import STATUS_COLORS, SessionStatus  # noqa: F401 — re-export
 
-class SessionStatus(Enum):
-    """Lifecycle state of a Claude Code session."""
-
-    WORKING = "working"  # 闪烁蓝
-    IDLE = "idle"  # 常亮绿
-    PERMISSION = "permission"  # 常亮黄
-    ERROR = "error"  # 闪烁红
-    STALE = "stale"  # 不亮灰
+__all__ = ["Session", "SessionStatus", "STATUS_COLORS"]
 
 
 @dataclass
@@ -23,5 +16,5 @@ class Session:
     subtitle: str = ""
     context_pct: float = 0.0
     model: str = ""
-    status: SessionStatus = SessionStatus.IDLE
+    status: SessionStatus = SessionStatus.UNKNOWN
     last_activity_ts: float = 0.0

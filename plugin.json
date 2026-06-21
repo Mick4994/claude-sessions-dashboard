@@ -1,0 +1,85 @@
+{
+  "name": "claude-sessions-dashboard",
+  "version": "1.0.0",
+  "description": "Floating always-on-top status bar that visualizes active Claude Code sessions with color-coded indicator lights (green idle / yellow working / red permission). Process-based session detection + hook-driven status updates.",
+  "author": {
+    "name": "Mick4994",
+    "url": "https://github.com/Mick4994"
+  },
+  "homepage": "https://github.com/Mick4994/claude-sessions-dashboard",
+  "repository": "https://github.com/Mick4994/claude-sessions-dashboard",
+  "license": "MIT",
+  "keywords": ["claude-code", "dashboard", "session", "monitor", "indicator", "windows"],
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python -c \"import re,sys,urllib.request; t=sys.stdin.read(); m=re.search(r'\\\"session_id\\\"\\s*:\\s*\\\"([^\\\"]+)\\\"',t); sid=m.group(1) if m else ''; urllib.request.urlopen(urllib.request.Request(f'http://127.0.0.1:18721/hook/UserPromptSubmit?sid={sid}',method='POST'))\""
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python -c \"import re,sys,urllib.request; t=sys.stdin.read(); m=re.search(r'\\\"session_id\\\"\\s*:\\s*\\\"([^\\\"]+)\\\"',t); sid=m.group(1) if m else ''; urllib.request.urlopen(urllib.request.Request(f'http://127.0.0.1:18721/hook/Stop?sid={sid}',method='POST'))\""
+          }
+        ]
+      }
+    ],
+    "StopFailure": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python -c \"import re,sys,urllib.request; t=sys.stdin.read(); m=re.search(r'\\\"session_id\\\"\\s*:\\s*\\\"([^\\\"]+)\\\"',t); sid=m.group(1) if m else ''; urllib.request.urlopen(urllib.request.Request(f'http://127.0.0.1:18721/hook/StopFailure?sid={sid}',method='POST'))\""
+          }
+        ]
+      }
+    ],
+    "PermissionRequest": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python -c \"import re,sys,urllib.request; t=sys.stdin.read(); m=re.search(r'\\\"session_id\\\"\\s*:\\s*\\\"([^\\\"]+)\\\"',t); sid=m.group(1) if m else ''; urllib.request.urlopen(urllib.request.Request(f'http://127.0.0.1:18721/hook/PermissionRequest?sid={sid}',method='POST'))\""
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python -c \"import re,sys,urllib.request; t=sys.stdin.read(); m=re.search(r'\\\"session_id\\\"\\s*:\\s*\\\"([^\\\"]+)\\\"',t); sid=m.group(1) if m else ''; urllib.request.urlopen(urllib.request.Request(f'http://127.0.0.1:18721/hook/PostToolUse?sid={sid}',method='POST'))\""
+          }
+        ]
+      }
+    ],
+    "PostToolUseFailure": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python -c \"import re,sys,urllib.request; t=sys.stdin.read(); m=re.search(r'\\\"session_id\\\"\\s*:\\s*\\\"([^\\\"]+)\\\"',t); sid=m.group(1) if m else ''; urllib.request.urlopen(urllib.request.Request(f'http://127.0.0.1:18721/hook/PostToolUseFailure?sid={sid}',method='POST'))\""
+          }
+        ]
+      }
+    ],
+    "PermissionDenied": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python -c \"import re,sys,urllib.request; t=sys.stdin.read(); m=re.search(r'\\\"session_id\\\"\\s*:\\s*\\\"([^\\\"]+)\\\"',t); sid=m.group(1) if m else ''; urllib.request.urlopen(urllib.request.Request(f'http://127.0.0.1:18721/hook/PermissionDenied?sid={sid}',method='POST'))\""
+          }
+        ]
+      }
+    ]
+  }
+}

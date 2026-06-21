@@ -34,9 +34,6 @@ def default_config_text() -> str:
     return """\
 [general]
 poll_interval_ms = 2000
-stale_after_minutes = 1440
-recent_seconds = 60
-hide_after_seconds = 86400
 expand_delay_ms = 200
 collapse_delay_ms = 500
 edge_snap_px = 30
@@ -55,4 +52,5 @@ max_visible_sessions = 20
 [behavior]
 auto_start = true
 start_minimized_to_tray = false
+hook_port = 18721
 """

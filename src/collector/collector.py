@@ -1,21 +1,22 @@
-"""Background poller: scans JSONL files, parses metadata, emits session list.
-Show/hide is driven by running CC processes, not file timestamps.
+"""Background poller: scans running CC processes, parses JSONL metadata.
+
+Show/hide is driven entirely by running CC processes, not file timestamps.
+JSONL is read ONLY for display metadata (title / context% / subtitle).
+Status (color) is driven by SessionRegistry updates from the hook server.
 """
+
 from __future__ import annotations
 
-import time
 from pathlib import Path
 
 from PySide6.QtCore import QObject, QTimer, Signal
 
-from .models import Session, SessionStatus
-from .process_monitor import alive_cwds
+from .process_monitor import alive_sessions
 from .session_parser import parse_session_metadata
-from .session_scanner import discover_jsonl_files
 
 
 class SessionCollector(QObject):
-    """Polls ~/.claude/projects for active sessions, emits updates on a timer."""
+    """Polls alive CC processes, parses JSONL metadata, emits session list updates."""
 
     sessionsChanged = Signal(list)  # list[Session]  # noqa: N815
 
@@ -23,9 +24,6 @@ class SessionCollector(QObject):
         self,
         *,
         poll_interval_ms: int = 2000,
-        recent_seconds: int = 60,
-        hide_after_seconds: int = 86400,
-        stale_after_minutes: int = 30,
         max_context_tokens: int = 1_000_000,
         title_truncate_chars: int = 32,
         subtitle_truncate_chars: int = 40,
@@ -33,8 +31,6 @@ class SessionCollector(QObject):
     ) -> None:
         super().__init__(parent)
         self._poll_interval_ms = poll_interval_ms
-        self._recent_seconds = recent_seconds
-        self._stale_after_minutes = stale_after_minutes
         self._max_context_tokens = max_context_tokens
         self._title_truncate_chars = title_truncate_chars
         self._subtitle_truncate_chars = subtitle_truncate_chars
@@ -64,77 +60,50 @@ class SessionCollector(QObject):
         return list(self._sessions.values())
 
     def scan_once(self) -> None:
-        now = time.time()
-
-        # Process-based: show sessions whose project dir matches a running CC CWD.
-        # CC encodes paths by replacing : and \ with -, e.g. "A:\Users\Mick4994" → "A--Users-Mick4994"
-        running_cwds: set[str] = set()
-        running_encoded: set[str] = set()
-        try:
-            for c in alive_cwds():
-                raw = str(Path(c).resolve())
-                running_cwds.add(raw)
-                running_encoded.add(raw.replace(":", "-").replace("\\", "-"))
-        except Exception:
-            pass
-
-        # Grace period: keep recently-active sessions visible briefly after CC exits
-        grace_cutoff = now - max(300, self._recent_seconds)
-        # JSONL recency threshold: only show sessions whose JSONL was touched in this window
-        # (filters out OLD session files in the same project dir)
-        recency_cutoff = now - max(300, self._recent_seconds)
-
         seen_ids: set[str] = set()
 
-        for jsonl in discover_jsonl_files(self.projects_dir):
-            sid = jsonl.stem
-            try:
-                mtime = jsonl.stat().st_mtime
-            except OSError:
+        # Group alive sessions by encoded CWD to share JSONL candidates.
+        by_cwd: dict[str, list[dict]] = {}
+        for s in alive_sessions():
+            encoded = str(Path(s["cwd"])).replace(":", "-").replace("\\", "-")
+            by_cwd.setdefault(encoded, []).append(s)
+
+        for proj_name, entries in by_cwd.items():
+            proj_dir = self.projects_dir / proj_name
+            if not proj_dir.is_dir():
                 continue
 
-            proj_name = jsonl.parent.name
-            cwd_match = proj_name in running_encoded
+            # Collect all JSONLs sorted by mtime descending.
+            candidates: list[Path] = []
+            for entry in proj_dir.iterdir():
+                if entry.is_file() and entry.suffix == ".jsonl":
+                    candidates.append(entry)
+            candidates.sort(key=lambda p: p.stat().st_mtime, reverse=True)
 
-            # Show only if:
-            # (a) this session's project has a running CC process AND its JSONL was touched recently
-            #     → this is the CURRENT session for that CC, not an old one in the same project
-            # (b) OR session had recent activity (grace period after CC exits)
-            is_current = cwd_match and mtime > recency_cutoff
-            in_grace = mtime > grace_cutoff and not cwd_match  # grace only after CC exit
+            # Assign the Nth most-recent JSONL to the Nth CC in this CWD.
+            for idx, sess_info in enumerate(entries):
+                if idx >= len(candidates):
+                    break
+                jsonl = candidates[idx]
 
-            if not (is_current or in_grace):
-                continue
+                try:
+                    session = parse_session_metadata(
+                        jsonl_path=jsonl,
+                        session_id=jsonl.stem,
+                        cwd=sess_info["cwd"],
+                        max_tokens=self._max_context_tokens,
+                        title_max=self._title_truncate_chars,
+                        subtitle_max=self._subtitle_truncate_chars,
+                    )
+                except Exception:
+                    continue
 
-            try:
-                session = parse_session_metadata(
-                    jsonl_path=jsonl,
-                    session_id=sid,
-                    cwd=str(jsonl.parent),
-                    max_tokens=self._max_context_tokens,
-                    title_max=self._title_truncate_chars,
-                    subtitle_max=self._subtitle_truncate_chars,
-                    recent_seconds=self._recent_seconds,
-                )
-            except Exception:
-                continue
+                # Preserve status from previous scan — hooks may have updated it.
+                if session.id in self._sessions:
+                    session.status = self._sessions[session.id].status
 
-            # Within visible window, never show STALE — show as IDLE instead
-            if session.status == SessionStatus.STALE:
-                session = Session(
-                    id=session.id,
-                    jsonl_path=session.jsonl_path,
-                    cwd=session.cwd,
-                    title=session.title,
-                    subtitle=session.subtitle,
-                    context_pct=session.context_pct,
-                    model=session.model,
-                    status=SessionStatus.IDLE,
-                    last_activity_ts=session.last_activity_ts,
-                )
-
-            seen_ids.add(sid)
-            self._sessions[sid] = session
+                seen_ids.add(session.id)
+                self._sessions[session.id] = session
 
         removed = [k for k in self._sessions if k not in seen_ids]
         for k in removed:
@@ -142,3 +111,7 @@ class SessionCollector(QObject):
 
         if removed or self._sessions:
             self.sessionsChanged.emit(self.current_sessions())
+
+
+# Re-export so UI imports still work.
+from .models import Session  # noqa: E402,F401

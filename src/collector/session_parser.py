@@ -1,9 +1,12 @@
-"""Parse Claude Code session JSONL files into Session dataclass."""
+"""Parse Claude Code session JSONL files into Session dataclass.
+
+Status is NOT determined here — it comes from the SessionRegistry via hooks.
+This module only parses display metadata: title, context %, subtitle, model.
+"""
 
 from __future__ import annotations
 
 import json
-import time
 from datetime import datetime
 from pathlib import Path
 
@@ -197,136 +200,6 @@ def _parse_subtitle(
     return "Thinking…"
 
 
-# ---- Status -----------------------------------------------------------------
-
-# Tools that require user approval in default (non-auto) permission mode.
-# Auto mode runs these without prompting, so they only count as WORKING there.
-_PERMISSION_TOOLS = {"Bash", "Write", "Edit", "MultiEdit", "NotebookEdit", "WebFetch"}
-
-
-def _gather_tool_use_ids(entries: list[dict]) -> set[str]:
-    ids: set[str] = set()
-    for e in entries:
-        if e.get("type") != "assistant":
-            continue
-        content = (e.get("message") or {}).get("content") or []
-        if not isinstance(content, list):
-            continue
-        for b in content:
-            if isinstance(b, dict) and b.get("type") == "tool_use":
-                tid = b.get("id")
-                if tid:
-                    ids.add(tid)
-    return ids
-
-
-def _gather_tool_result_ids(entries: list[dict]) -> set[str]:
-    ids: set[str] = set()
-    for e in entries:
-        if e.get("type") != "user":
-            continue
-        content = (e.get("message") or {}).get("content") or []
-        if not isinstance(content, list):
-            continue
-        for b in content:
-            if isinstance(b, dict) and b.get("type") == "tool_result":
-                tid = b.get("tool_use_id")
-                if tid:
-                    ids.add(tid)
-    return ids
-
-
-def _gather_pending_tool_names(entries: list[dict]) -> set[str]:
-    """Names of tool_uses that don't yet have a tool_result."""
-    use_ids = _gather_tool_use_ids(entries)
-    res_ids = _gather_tool_result_ids(entries)
-    pending_ids = use_ids - res_ids
-    names: set[str] = set()
-    for e in entries:
-        if e.get("type") != "assistant":
-            continue
-        content = (e.get("message") or {}).get("content") or []
-        if not isinstance(content, list):
-            continue
-        for b in content:
-            if isinstance(b, dict) and b.get("type") == "tool_use":
-                if b.get("id") in pending_ids:
-                    name = b.get("name")
-                    if isinstance(name, str):
-                        names.add(name)
-    return names
-
-
-def _permission_mode(entries: list[dict]) -> str:
-    """Return the session's permission mode ('auto' | 'default' | 'plan' | ...).
-    Defaults to 'default' if the header entry is not in the read window — safer
-    to assume permission may be needed than to silently drop PERMISSION."""
-    for e in entries:
-        if e.get("type") == "permission-mode":
-            mode = e.get("permissionMode")
-            if isinstance(mode, str):
-                return mode
-    return "default"
-
-
-def _has_tool_result_recent(entries: list[dict]) -> bool:
-    """True if the most recent user entry contains a tool_result block."""
-    for e in reversed(entries):
-        if e.get("type") == "user":
-            content = (e.get("message") or {}).get("content") or []
-            if isinstance(content, list):
-                return any(
-                    isinstance(b, dict) and b.get("type") == "tool_result"
-                    for b in content
-                )
-            return False
-    return False
-
-
-def _determine_status(
-    entries: list[dict],
-    *,
-    now: float,
-    recent_seconds: int = 60,
-) -> SessionStatus:
-    if not entries:
-        return SessionStatus.STALE
-
-    last = entries[-1]
-    last_ts = _entry_ts(last)
-    if last_ts is None or (now - last_ts) > recent_seconds:
-        return SessionStatus.STALE
-
-    last_type = last.get("type")
-
-    if last_type == "assistant":
-        stop_reason = last.get("stop_reason")
-        if stop_reason == "tool_use":
-            pending = _gather_pending_tool_names(entries)
-            if pending:
-                # Auto mode auto-executes risky tools — never PERMISSION there.
-                # Default (or unknown) mode: risky tool pending = permission requested.
-                perm_mode = _permission_mode(entries)
-                if perm_mode != "auto" and pending & _PERMISSION_TOOLS:
-                    return SessionStatus.PERMISSION
-                return SessionStatus.WORKING
-            # Tool use + result already in tail → agent waiting for next prompt.
-            return SessionStatus.IDLE
-        if stop_reason == "end_turn":
-            return SessionStatus.IDLE
-        # No stop_reason yet → assistant is still streaming.
-        return SessionStatus.WORKING
-
-    if last_type == "user":
-        # tool_result = a tool just completed; agent is processing the output → WORKING.
-        # Plain user text = waiting for agent to pick it up → IDLE.
-        if _has_tool_result_recent(entries):
-            return SessionStatus.WORKING
-        return SessionStatus.IDLE
-
-    return SessionStatus.IDLE
-
-
 # ---- Full metadata ----------------------------------------------------------
 
 
@@ -355,16 +228,15 @@ def parse_session_metadata(
     max_tokens: int,
     title_max: int,
     subtitle_max: int,
-    recent_seconds: int = 60,
 ) -> Session:
-    """Parse tail of a JSONL file into a Session dataclass."""
+    """Parse tail of a JSONL file into a Session dataclass.
+    Status defaults to UNKNOWN — the registry updates it via hook events."""
     entries = _read_jsonl_tail(jsonl_path)
     actual_cwd = _latest_cwd(entries, cwd)
     title = _parse_title(entries, cwd=actual_cwd, max_chars=title_max)
     subtitle = _parse_subtitle(entries, max_chars=subtitle_max, idle=False)
     pct = _parse_context_pct(entries, max_tokens=max_tokens)
     model = _latest_model(entries)
-    status = _determine_status(entries, now=time.time(), recent_seconds=recent_seconds)
     last_ts = 0.0
     for e in reversed(entries):
         ts = _entry_ts(e)
@@ -379,6 +251,6 @@ def parse_session_metadata(
         subtitle=subtitle,
         context_pct=pct,
         model=model,
-        status=status,
+        status=SessionStatus.UNKNOWN,
         last_activity_ts=last_ts,
     )

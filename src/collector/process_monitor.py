@@ -30,21 +30,27 @@ def _is_cc_process(name: str, cmdline: list[str] | None, cwd: str | None) -> boo
     return True
 
 
-def alive_cwds() -> set[str]:
+def alive_sessions() -> list[dict]:
+    """Return list of {pid, cwd} for every real CC process."""
     try:
         import psutil
     except ImportError:
-        return set()
+        return []
 
-    result: set[str] = set()
-    for proc in psutil.process_iter(["name", "cmdline", "cwd"]):
+    result: list[dict] = []
+    for proc in psutil.process_iter(["pid", "name", "cmdline", "cwd"]):
         try:
             info = proc.info
             if not _is_cc_process(info.get("name") or "", info.get("cmdline"), info.get("cwd")):
                 continue
             cwd = info.get("cwd")
             if cwd and Path(cwd).exists():
-                result.add(cwd)
+                result.append({"pid": info["pid"], "cwd": cwd})
         except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
             continue
     return result
+
+
+def alive_cwds() -> set[str]:
+    """Backward-compatible: return unique CWDs of real CC processes."""
+    return {s["cwd"] for s in alive_sessions()}

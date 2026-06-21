@@ -27,6 +27,7 @@ class Config:
 
     auto_start: bool = True
     start_minimized_to_tray: bool = False
+    hook_port: int = 18721
 
     @classmethod
     def default(cls) -> Config:
