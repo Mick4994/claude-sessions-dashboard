@@ -1,4 +1,4 @@
-"""Windows Task Scheduler wrapper for autostart."""
+"""Windows autostart via HKCU Run registry key (no admin required)."""
 
 from __future__ import annotations
 
@@ -7,22 +7,25 @@ import subprocess
 import sys
 from pathlib import Path
 
-TASK_NAME = "ClaudeSessionsDashboard"
+_RUN_KEY = r"HKCU\Software\Microsoft\Windows\CurrentVersion\Run"
+_VALUE_NAME = "ClaudeSessionsDashboard"
 
 
-def _exe_path() -> str:
+def _command() -> str:
+    """Return the autostart command string."""
     if getattr(sys, "_MEIPASS", False) or getattr(os, "frozen", False):
-        return os.path.abspath(sys.executable)
+        return f'"{os.path.abspath(sys.executable)}"'
     project_dir = Path(__file__).resolve().parents[2]
+    exe = project_dir / ".venv" / "Scripts" / "pythonw.exe"
     script = project_dir / "claude_dashboard.py"
-    return f'cmd /c "cd /D {project_dir} && uv run python {script}"'
+    return f'"{exe}" "{script}"'
 
 
 def is_enabled() -> bool:
     if os.name != "nt":
         return False
     out = subprocess.run(
-        ["schtasks", "/Query", "/TN", TASK_NAME],
+        ["reg", "query", _RUN_KEY, "/v", _VALUE_NAME],
         capture_output=True,
         text=True,
     )
@@ -32,8 +35,11 @@ def is_enabled() -> bool:
 def enable() -> bool:
     if os.name != "nt":
         return False
-    cmd = f'schtasks /Create /TN {TASK_NAME} /TR "{_exe_path()}" /SC ONLOGON /RL HIGHEST /F'
-    out = subprocess.run(cmd, shell=True, capture_output=True, text=True)
+    out = subprocess.run(
+        ["reg", "add", _RUN_KEY, "/v", _VALUE_NAME, "/t", "REG_SZ", "/d", _command(), "/f"],
+        capture_output=True,
+        text=True,
+    )
     return out.returncode == 0
 
 
@@ -41,8 +47,8 @@ def disable() -> bool:
     if os.name != "nt":
         return False
     out = subprocess.run(
-        ["schtasks", "/Delete", "/TN", TASK_NAME, "/F"],
+        ["reg", "delete", _RUN_KEY, "/v", _VALUE_NAME, "/f"],
         capture_output=True,
         text=True,
     )
-    return out.returncode == 0
+    return out.returncode == 0 or "not found" in (out.stderr + out.stdout).lower()

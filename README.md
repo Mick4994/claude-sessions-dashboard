@@ -13,37 +13,92 @@ Floating always-on-top status bar for active Claude Code sessions — color-code
 
 ```
 CC processes (psutil) ──> ProcessPoller ──> SessionRegistry ──> UI (list add/remove)
-CC hooks ──> curl POST ──> HookServer :18721 ──> HookRouter ──> SessionRegistry ──> UI (status color)
+CC hooks ──> POST :18721 ──> HookServer ──> HookRouter ──> SessionRegistry ──> UI (status color)
 JSONL files ──> SessionCollector ──> UI (title / context% / subtitle)
 ```
 
-**List management** and **indicator status** are fully decoupled.
-See [docs/plans/2026-06-21-hook-driven-refactor.md](docs/plans/2026-06-21-hook-driven-refactor.md) for the full architecture.
+**List management** (process polling) and **indicator status** (hook events) are fully decoupled.
 
-## Quick Start
+## Install Order (MUST follow this sequence)
 
-### 1. Install dependencies
+> ⚠ **The order matters.** The dashboard must be running before CC fires any hook,
+> and the marketplace must be added before `/plugin install` works.
+
+1. **Add the marketplace** (before installing the plugin — otherwise `/plugin install`
+   fails with `Plugin not found in marketplace`).
+2. **Install dependencies** and **start the dashboard**.
+3. **Set up autostart** so the dashboard runs on every login.
+4. **Configure CC hooks** (sends events to the running dashboard).
+
+---
+
+### Step 1 — Add the marketplace
+
+Add to `~/.claude/settings.local.json` under `extraKnownMarketplaces`:
+
+```json
+{
+  "extraKnownMarketplaces": {
+    "claude-sessions-dashboard": {
+      "source": { "repo": "Mick4994/claude-sessions-dashboard", "source": "github" }
+    }
+  }
+}
+```
+
+Reload CC, then verify with `/plugin marketplace list`.
+
+> **Why this step is easy to miss**: CC Switch overwrites `~/.claude/settings.json`
+> on every reload, so marketplace registrations in `settings.json` vanish. Putting
+> them in `settings.local.json` makes them survive rewrites.
+
+---
+
+### Step 2 — Install dependencies and start the dashboard
 
 ```bash
 cd D:/Codes/claude-sessions-dashboard
 uv sync
+uv run pythonw claude_dashboard.py      # no console window
 ```
 
-### 2. Start the dashboard
+The dashboard listens on `localhost:18721` for hook events and polls CC processes
+every 2 seconds. A tray icon appears when it's running.
+
+> ⚠ **Start the dashboard BEFORE configuring hooks in Step 4.** Hooks POST to
+> `localhost:18721` — if the dashboard isn't running, the hooks silently fail
+> (POST refused) and indicator colors never update. You'll still see sessions
+> listed (process polling works independently), but all colors stay gray.
+
+---
+
+### Step 3 — Enable autostart on login
+
+So the dashboard is running before any CC session starts:
 
 ```bash
-uv run pythonw claude_dashboard.py
+uv run python -c "from src.win32.autostart import enable; print(enable())"
 ```
 
-The dashboard listens on `localhost:18721` for hook events and polls CC processes every 2 seconds.
+This writes an `HKCU\...\Run` registry entry (no admin required). On next login,
+Windows launches `pythonw claude_dashboard.py` automatically.
 
-### 3. Configure CC hooks
+Verify / disable:
+
+```bash
+uv run python -c "from src.win32.autostart import is_enabled; print(is_enabled())"
+uv run python -c "from src.win32.autostart import disable; print(disable())"
+```
+
+---
+
+### Step 4 — Configure CC hooks
 
 > **IMPORTANT**: CC Switch periodically overwrites `~/.claude/settings.json`.
-> All plugin enables, marketplaces, and hooks MUST go in `~/.claude/settings.local.json`
-> to survive rewrites.
+> All hooks MUST go in `~/.claude/settings.local.json` to survive rewrites.
 
-Add this to `~/.claude/settings.local.json`:
+Add this to `~/.claude/settings.local.json` (merge with the marketplace entry
+from Step 1):
 
 ```json
 {
@@ -59,18 +114,28 @@ Add this to `~/.claude/settings.local.json`:
 }
 ```
 
-### 4. Install as CC plugin (optional)
+---
+
+### Step 5 — Install as CC plugin (optional)
 
 ```bash
-# Add marketplace
-# (already in settings.local.json extraKnownMarketplaces if you followed step 3)
-
 /plugin install claude-sessions-dashboard@claude-sessions-dashboard
 ```
 
 > After `/plugin install`, CC Switch may overwrite `settings.json` and drop the enable.
 > Ensure `"claude-sessions-dashboard@claude-sessions-dashboard": true` is in
 > `~/.claude/settings.local.json` under `enabledPlugins`.
+
+## Process Matching
+
+Sessions are discovered by scanning running processes via `psutil`. A process is
+treated as a Claude Code session if **its executable name contains `claude`**
+(e.g. `claude.exe`, `claude-code.exe` — robust to naming variants across
+machines/installations). The `.claude-mem/` worker is excluded by CWD.
+
+If sessions don't appear on another machine:
+- Confirm the CC executable name contains `claude` (check Task Manager).
+- Confirm `~/.claude/projects/<encoded-cwd>/*.jsonl` exists for that session's CWD.
 
 ## Config
 
@@ -87,7 +152,7 @@ hook_port = 18721
 ## Development
 
 ```bash
-uv run pytest                           # 115 tests
+uv run pytest                           # tests
 uv run python claude_dashboard.py       # run with console output
 ```
 

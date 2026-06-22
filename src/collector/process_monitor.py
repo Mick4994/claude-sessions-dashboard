@@ -3,24 +3,20 @@ from __future__ import annotations
 
 from pathlib import Path
 
-# Real CC uses --permission-mode; claude-mem observer / hook subprocesses use stream-json IO.
-_CC_OBSERVER_FLAGS = ("--input-format stream-json", "--output-format stream-json")
+# claude-mem worker runs inside .claude-mem/ — never a real user session.
 _CLAUDE_MEM_DIR = ".claude-mem"
 
 
 def _is_cc_process(name: str, cmdline: list[str] | None, cwd: str | None) -> bool:
-    """Return True only for real Claude Code (excludes claude-mem observer and friends)."""
-    if not cmdline:
-        return False
+    """Return True for real Claude Code processes.
+
+    Robust to process-name variants (claude.exe, claude-code.exe, etc):
+    match any .exe whose name contains "claude". Exclude claude-mem workers
+    by CWD only — do NOT filter by cmdline flags, which can false-negative
+    real CC sessions in stream-json modes.
+    """
     name_lower = (name or "").lower()
-    cmdline_str = " ".join(cmdline).lower()
-
-    # Must look like Claude Code: claude.exe is the only process name CC ships.
-    if name_lower != "claude.exe":
-        return False
-
-    # claude-mem observer and similar hook subprocesses use stream-json IO.
-    if any(flag in cmdline_str for flag in _CC_OBSERVER_FLAGS):
+    if not (name_lower.endswith(".exe") and "claude" in name_lower):
         return False
 
     # claude-mem worker runs inside .claude-mem/ — never a real user session.
