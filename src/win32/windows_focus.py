@@ -60,24 +60,11 @@ if os.name == "nt":
                 return hwnd
         return None
 
-    def _find_wt_window_for_pid(target_pid: int) -> int | None:
-        """Find a visible CASCADIA_HOSTING_WINDOW_CLASS window. We can't directly
-        map a powershell PID to a WT tab, so return the first visible WT window
-        whose tree includes target_pid (parents or children)."""
-        # First try: WT window owned by a process that's a parent of target_pid.
-        try:
-            target_p = psutil.Process(target_pid)
-            ancestor_pids: set[int] = set()
-            cur = target_p
-            for _ in range(8):
-                ancestor_pids.add(cur.pid)
-                par = cur.parent()
-                if par is None:
-                    break
-                cur = par
-        except (psutil.NoSuchProcess, psutil.AccessDenied):
-            ancestor_pids = set()
-
+    def _find_wt_window_for_pid(powershell_pid: int) -> int | None:
+        """Find the visible CASCADIA_HOSTING_WINDOW_CLASS window whose process tree
+        includes powershell_pid (the tab shell). powershell_pid is the PID of the
+        process running inside a WT ConPTY tab — we want to find the WT hosting
+        window that owns it as a descendant."""
         found: list[int] = []
 
         def cb(hwnd, _):
@@ -87,15 +74,10 @@ if os.name == "nt":
                 return True
             pid = wt.DWORD()
             _GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
-            # Either WT directly owns target, or a descendant of WT owns target.
-            if pid.value in ancestor_pids:
-                found.append(hwnd)
-                return False
-            # Or target is a descendant of the WT process.
             try:
-                p = psutil.Process(pid.value)
-                kids = {c.pid for c in p.children(recursive=True)}
-                if target_pid in kids:
+                wt_p = psutil.Process(pid.value)
+                kids = {c.pid for c in wt_p.children(recursive=True)}
+                if powershell_pid in kids:
                     found.append(hwnd)
                     return False
             except (psutil.NoSuchProcess, psutil.AccessDenied):
@@ -121,8 +103,9 @@ if os.name == "nt":
                     break
                 parent_name = parent.name().lower()
                 if parent_name in _WT_NAMES:
-                    # WT host — find the right WT window.
-                    return _find_wt_window_for_pid(parent.pid)
+                    # p is the shell process (powershell.exe) inside the WT tab;
+                    # find the WT hosting window that owns p as a descendant.
+                    return _find_wt_window_for_pid(p.pid)
                 hwnd = _find_window_for_process(parent.pid)
                 if hwnd:
                     return hwnd
