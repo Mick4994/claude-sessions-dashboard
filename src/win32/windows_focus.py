@@ -65,43 +65,44 @@ if os.name == "nt":
 
     def _find_wt_window_for_pid(powershell_pid: int, cwd: str = "") -> int | None:
         """Find the visible CASCADIA_HOSTING_WINDOW_CLASS window whose process tree
-        includes powershell_pid. Disambiguates by title match then by largest area."""
-        found: list[tuple[int, int, int]] = []  # (priority, -area, hwnd)
+        includes powershell_pid. Disambiguates by title match then by largest area.
+        Uses FindWindowExW loop (no callback) — safe in pythonw."""
+        cand: list[tuple[int, int, int]] = []  # (priority, -area, hwnd)
         needle = os.path.basename(cwd.rstrip("/\\")).lower() if cwd else ""
-
-        def cb(hwnd, _):
+        hwnd = 0
+        while True:
+            hwnd = _FindWindowExW(0, hwnd, None, None)
+            if not hwnd:
+                break
             if not _IsWindowVisible(hwnd):
-                return True
+                continue
             if _class_name(hwnd) != _WT_CLASS:
-                return True
+                continue
             pid = wt.DWORD()
             _GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
             try:
                 wt_p = psutil.Process(pid.value)
                 kids = {c.pid for c in wt_p.children(recursive=True)}
                 if powershell_pid not in kids:
-                    return True
+                    continue
             except (psutil.NoSuchProcess, psutil.AccessDenied):
-                return True
+                continue
             r = wt.RECT()
             area = 0
             if _GetWindowRect(hwnd, ctypes.byref(r)):
                 area = (r.right - r.left) * (r.bottom - r.top)
-            n = _GetWindowTextLengthW(hwnd)
             title = ""
+            n = _GetWindowTextLengthW(hwnd)
             if n > 0:
                 buf = ctypes.create_unicode_buffer(n + 1)
                 _GetWindowTextW(hwnd, buf, n + 1)
                 title = buf.value.lower()
             priority = 0 if (needle and needle in title) else 1
-            found.append((priority, -area, hwnd))
-            return True
-
-        _EnumWindows(_EnumWindowsProc(cb), 0)
-        if not found:
+            cand.append((priority, -area, hwnd))
+        if not cand:
             return None
-        found.sort(key=lambda x: (x[0], x[1]))
-        return found[0][2]
+        cand.sort(key=lambda x: (x[0], x[1]))
+        return cand[0][2]
 
     def _is_descendant_of(pid: int, ancestor_pid: int) -> bool:
         """Return True if pid appears anywhere in the process tree rooted at ancestor_pid."""
@@ -224,29 +225,26 @@ if os.name == "nt":
         needle = os.path.basename(cwd.rstrip("/\\")).lower()
         if not needle:
             return None
-        found: list[int] = []
-
-        def cb(hwnd, _lparam):
+        hwnd = 0
+        while True:
+            hwnd = _FindWindowExW(0, hwnd, None, None)
+            if not hwnd:
+                break
             if not _IsWindowVisible(hwnd):
-                return True
+                continue
             if not _rect_nonempty(hwnd):
-                return True
-            length = _GetWindowTextLengthW(hwnd)
-            if length == 0:
-                return True
-            buf = ctypes.create_unicode_buffer(length + 1)
-            _GetWindowTextW(hwnd, buf, length + 1)
+                continue
+            n = _GetWindowTextLengthW(hwnd)
+            if n == 0:
+                continue
+            buf = ctypes.create_unicode_buffer(n + 1)
+            _GetWindowTextW(hwnd, buf, n + 1)
             title = buf.value.lower()
             cls = _class_name(hwnd).lower()
-            # Match by title substring or by known terminal class.
             if cls == _WT_CLASS.lower() or any(t.lower() in title for t in _TERMINAL_TITLES):
                 if needle in title:
-                    found.append(hwnd)
-                    return False
-            return True
-
-        _EnumWindows(_EnumWindowsProc(cb), 0)
-        return found[0] if found else None
+                    return hwnd
+        return None
 
     def activate_window(hwnd: int) -> bool:
         """Bring a window to the foreground, even from a background (pythonw) process.
