@@ -128,19 +128,24 @@ def main() -> int:
 
     # -- card click → activate CC terminal --
     def on_card_clicked(session_id: str):
+        logger.info("cardClicked: sid=%s", session_id)
         hwnd = None
-        # Prefer PID-based window lookup (robust to title changes).
         entry = registry.get_by_sid(session_id)
         if entry and entry.pid:
+            logger.info("cardClicked: trying PID=%d", entry.pid)
             hwnd = find_terminal_for_pid(entry.pid)
-        # Fallback: CWD-based title matching.
+            logger.info("cardClicked: find_terminal_for_pid(%d) → hwnd=%s", entry.pid, hwnd)
         if hwnd is None:
             sessions = collector.current_sessions()
             sess = next((s for s in sessions if s.id == session_id), None)
             if sess and sess.cwd:
+                logger.info("cardClicked: fallback cwd=%s", sess.cwd)
                 hwnd = find_terminal_for_cwd(sess.cwd)
         if hwnd:
-            activate_window(hwnd)
+            ok = activate_window(hwnd)
+            logger.info("cardClicked: activate_window(%s) → %s", hwnd, ok)
+        else:
+            logger.warning("cardClicked: no hwnd found for sid=%s", session_id)
 
     signalBus.cardClicked.connect(on_card_clicked)
 
