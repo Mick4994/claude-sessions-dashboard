@@ -34,6 +34,7 @@ if os.name == "nt":
     _WT_CLASS = "CASCADIA_HOSTING_WINDOW_CLASS"
     _WT_NAMES = ("windowsterminal.exe", "wt.exe")
     _TERMINAL_TITLES = ("Claude Code", "cmd.exe", "Windows Terminal", "PowerShell", "pwsh")
+    _TERMINAL_CLASSES = {"ConsoleWindowClass", "CASCADIA_HOSTING_WINDOW_CLASS"}
 
     def _rect_nonempty(hwnd: int) -> bool:
         rect = wt.RECT()
@@ -57,15 +58,16 @@ if os.name == "nt":
             pid = wt.DWORD()
             _GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
             if pid.value == target_pid and _IsWindowVisible(hwnd) and _rect_nonempty(hwnd):
-                return hwnd
+                cls = _class_name(hwnd)
+                if cls in _TERMINAL_CLASSES:
+                    return hwnd
         return None
 
-    def _find_wt_window_for_pid(powershell_pid: int) -> int | None:
+    def _find_wt_window_for_pid(powershell_pid: int, cwd: str = "") -> int | None:
         """Find the visible CASCADIA_HOSTING_WINDOW_CLASS window whose process tree
-        includes powershell_pid (the tab shell). powershell_pid is the PID of the
-        process running inside a WT ConPTY tab — we want to find the WT hosting
-        window that owns it as a descendant."""
-        found: list[int] = []
+        includes powershell_pid. Disambiguates by title match then by largest area."""
+        found: list[tuple[int, int, int]] = []  # (priority, -area, hwnd)
+        needle = os.path.basename(cwd.rstrip("/\\")).lower() if cwd else ""
 
         def cb(hwnd, _):
             if not _IsWindowVisible(hwnd):
@@ -77,15 +79,101 @@ if os.name == "nt":
             try:
                 wt_p = psutil.Process(pid.value)
                 kids = {c.pid for c in wt_p.children(recursive=True)}
-                if powershell_pid in kids:
-                    found.append(hwnd)
-                    return False
+                if powershell_pid not in kids:
+                    return True
             except (psutil.NoSuchProcess, psutil.AccessDenied):
-                pass
+                return True
+            r = wt.RECT()
+            area = 0
+            if _GetWindowRect(hwnd, ctypes.byref(r)):
+                area = (r.right - r.left) * (r.bottom - r.top)
+            n = _GetWindowTextLengthW(hwnd)
+            title = ""
+            if n > 0:
+                buf = ctypes.create_unicode_buffer(n + 1)
+                _GetWindowTextW(hwnd, buf, n + 1)
+                title = buf.value.lower()
+            priority = 0 if (needle and needle in title) else 1
+            found.append((priority, -area, hwnd))
             return True
 
         _EnumWindows(_EnumWindowsProc(cb), 0)
-        return found[0] if found else None
+        if not found:
+            return None
+        found.sort(key=lambda x: (x[0], x[1]))
+        return found[0][2]
+
+    def _is_descendant_of(pid: int, ancestor_pid: int) -> bool:
+        """Return True if pid appears anywhere in the process tree rooted at ancestor_pid."""
+        try:
+            p = psutil.Process(pid)
+            for _ in range(16):
+                par = p.parent()
+                if par is None:
+                    return False
+                if par.pid == ancestor_pid:
+                    return True
+                p = par
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            pass
+        return False
+
+    def _find_terminal_window_global(cc_pid: int, cwd: str = "") -> int | None:
+        """Fallback: enumerate ALL terminal-class windows and find one whose process
+        tree includes cc_pid. Sort by title match then largest area."""
+        cand: list[tuple[int, int, int]] = []  # (-priority, area, hwnd)
+        needle = os.path.basename(cwd.rstrip("/\\")).lower() if cwd else ""
+        hwnd = 0
+        while True:
+            hwnd = _FindWindowExW(0, hwnd, None, None)
+            if not hwnd:
+                break
+            if not _IsWindowVisible(hwnd):
+                continue
+            cls = _class_name(hwnd)
+            if cls not in _TERMINAL_CLASSES:
+                continue
+            pid = wt.DWORD()
+            _GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+            owner_pid = pid.value
+            # Check if cc_pid is a descendant of this window's process
+            if not _is_descendant_of(cc_pid, owner_pid):
+                # Also check if any ancestor of cc_pid is a child of owner_pid
+                found = False
+                try:
+                    owner_p = psutil.Process(owner_pid)
+                    kids = {c.pid for c in owner_p.children(recursive=True)}
+                    cc = psutil.Process(cc_pid)
+                    cur = cc
+                    for _ in range(16):
+                        if cur.pid in kids:
+                            found = True
+                            break
+                        par = cur.parent()
+                        if par is None:
+                            break
+                        cur = par
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    pass
+                if not found:
+                    continue
+            # Compute priority: title match = 0, no match = 1
+            r = wt.RECT()
+            area = 0
+            if _GetWindowRect(hwnd, ctypes.byref(r)):
+                area = (r.right - r.left) * (r.bottom - r.top)
+            title = ""
+            n = _GetWindowTextLengthW(hwnd)
+            if n > 0:
+                buf = ctypes.create_unicode_buffer(n + 1)
+                _GetWindowTextW(hwnd, buf, n + 1)
+                title = buf.value.lower()
+            priority = 0 if (needle and needle in title) else 1
+            cand.append((-priority, area, hwnd))
+        if not cand:
+            return None
+        cand.sort(key=lambda x: (x[0], -x[1]))
+        return cand[0][2]
 
     def find_terminal_for_pid(pid: int) -> int | None:
         """Walk the parent chain of a CC process to find its terminal window.
@@ -96,20 +184,34 @@ if os.name == "nt":
         if pid <= 0:
             return None
         try:
-            p = psutil.Process(pid)
+            # 提取 CC 进程的 cwd，用于 WT 标签页标题匹配
+            cc = psutil.Process(pid)
+            try:
+                cwd = cc.cwd() or ""
+            except Exception:
+                cwd = ""
+            p = cc
             for _ in range(8):
                 parent = p.parent()
                 if parent is None:
                     break
                 parent_name = parent.name().lower()
                 if parent_name in _WT_NAMES:
-                    # p is the shell process (powershell.exe) inside the WT tab;
-                    # find the WT hosting window that owns p as a descendant.
-                    return _find_wt_window_for_pid(p.pid)
+                    return _find_wt_window_for_pid(p.pid, cwd)
                 hwnd = _find_window_for_process(parent.pid)
                 if hwnd:
                     return hwnd
+                # 查父进程的子进程（conhost 是 powershell 的子进程）和非 WT 下的 cmd 终端
+                try:
+                    for child in parent.children(recursive=True):
+                        hwnd = _find_window_for_process(child.pid)
+                        if hwnd:
+                            return hwnd
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    pass
                 p = parent
+            # 父链没找到 → 全局搜索：扫所有终端 class 窗口，找包含 CC 进程树的
+            return _find_terminal_window_global(pid, cwd)
         except (psutil.NoSuchProcess, psutil.AccessDenied):
             pass
         except Exception:
