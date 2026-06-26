@@ -16,6 +16,9 @@ if os.name == "nt":
     _IsWindowVisible = _user32.IsWindowVisible
     _SetForegroundWindow = _user32.SetForegroundWindow
     _ShowWindow = _user32.ShowWindow
+    _AllowSetForegroundWindow = _user32.AllowSetForegroundWindow
+    _BringWindowToTop = _user32.BringWindowToTop
+    _GetForegroundWindow = _user32.GetForegroundWindow
 
     _TERMINAL_TITLES = ("Claude Code", "cmd.exe", "Windows Terminal", "PowerShell", "pwsh")
 
@@ -80,10 +83,20 @@ if os.name == "nt":
         return found[0] if found else None
 
     def activate_window(hwnd: int) -> bool:
+        """Bring a window to the foreground, even from a background (pythonw) process.
+        Uses the AllowSetForegroundWindow + BringWindowToTop + SetForegroundWindow
+        combo to pass Windows 11 foreground lock."""
         if not hwnd:
             return False
+        # Allow this process to set foreground — required for pythonw (no UI thread).
+        _AllowSetForegroundWindow(-1)  # ASFW_ANY = 0xFFFFFFFF
         _ShowWindow(hwnd, 9)  # SW_RESTORE
-        return bool(_SetForegroundWindow(hwnd))
+        _BringWindowToTop(hwnd)
+        _SetForegroundWindow(hwnd)
+        # Small delay to let the window settle, then check.
+        import time as _time
+        _time.sleep(0.05)
+        return _GetForegroundWindow() == hwnd
 
 else:
 
