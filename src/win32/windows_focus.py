@@ -19,6 +19,8 @@ if os.name == "nt":
     _AllowSetForegroundWindow = _user32.AllowSetForegroundWindow
     _BringWindowToTop = _user32.BringWindowToTop
     _GetForegroundWindow = _user32.GetForegroundWindow
+    _SwitchToThisWindow = _user32.SwitchToThisWindow
+    _SwitchToThisWindow.argtypes = (wt.HWND, wt.BOOL)
 
     _TERMINAL_TITLES = ("Claude Code", "cmd.exe", "Windows Terminal", "PowerShell", "pwsh")
 
@@ -84,17 +86,22 @@ if os.name == "nt":
 
     def activate_window(hwnd: int) -> bool:
         """Bring a window to the foreground, even from a background (pythonw) process.
-        Uses the AllowSetForegroundWindow + BringWindowToTop + SetForegroundWindow
-        combo to pass Windows 11 foreground lock."""
+
+        Uses SwitchToThisWindow (bypasses the foreground lock) with a keybd_event
+        ALT-sim to grant foreground activation rights to our thread."""
         if not hwnd:
             return False
-        # Allow this process to set foreground — required for pythonw (no UI thread).
-        _AllowSetForegroundWindow(-1)  # ASFW_ANY = 0xFFFFFFFF
+        import time as _time
+
+        # Simulate ALT key — grants foreground rights to the calling thread.
+        # This is the thread processing Qt's mousePressEvent, so foreground
+        # rights are available after the user clicked on our window.
+        _user32.keybd_event(0x12, 0, 0, 0)  # VK_MENU down
+        _user32.keybd_event(0x12, 0, 2, 0)  # VK_MENU up (KEYEVENTF_KEYUP=2)
+
         _ShowWindow(hwnd, 9)  # SW_RESTORE
         _BringWindowToTop(hwnd)
-        _SetForegroundWindow(hwnd)
-        # Small delay to let the window settle, then check.
-        import time as _time
+        _SwitchToThisWindow(hwnd, True)
         _time.sleep(0.05)
         return _GetForegroundWindow() == hwnd
 
