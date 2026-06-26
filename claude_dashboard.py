@@ -128,24 +128,33 @@ def main() -> int:
 
     # -- card click → activate CC terminal --
     def on_card_clicked(session_id: str):
-        logger.info("cardClicked: sid=%s", session_id)
+        import os as _os, datetime as _dt
+
+        _log = Path(_os.environ.get("TEMP", ".")) / "csd_click_debug.log"
+        with open(_log, "a") as _f:
+            _f.write(f"{_dt.datetime.now():%H:%M:%S.%f} cardClicked sid={session_id}\n")
         hwnd = None
         entry = registry.get_by_sid(session_id)
         if entry and entry.pid:
-            logger.info("cardClicked: trying PID=%d", entry.pid)
+            with open(_log, "a") as _f:
+                _f.write(f"{_dt.datetime.now():%H:%M:%S.%f}   entry.pid={entry.pid}\n")
             hwnd = find_terminal_for_pid(entry.pid)
-            logger.info("cardClicked: find_terminal_for_pid(%d) → hwnd=%s", entry.pid, hwnd)
+            with open(_log, "a") as _f:
+                _f.write(f"{_dt.datetime.now():%H:%M:%S.%f}   find_terminal_for_pid({entry.pid}) → hwnd={hwnd}\n")
         if hwnd is None:
             sessions = collector.current_sessions()
             sess = next((s for s in sessions if s.id == session_id), None)
             if sess and sess.cwd:
-                logger.info("cardClicked: fallback cwd=%s", sess.cwd)
+                with open(_log, "a") as _f:
+                    _f.write(f"{_dt.datetime.now():%H:%M:%S.%f}   fallback cwd={sess.cwd}\n")
                 hwnd = find_terminal_for_cwd(sess.cwd)
         if hwnd:
             ok = activate_window(hwnd)
-            logger.info("cardClicked: activate_window(%s) → %s", hwnd, ok)
+            with open(_log, "a") as _f:
+                _f.write(f"{_dt.datetime.now():%H:%M:%S.%f}   activate_window({hwnd}) → {ok}\n")
         else:
-            logger.warning("cardClicked: no hwnd found for sid=%s", session_id)
+            with open(_log, "a") as _f:
+                _f.write(f"{_dt.datetime.now():%H:%M:%S.%f}   NO hwnd for sid={session_id}\n")
 
     signalBus.cardClicked.connect(on_card_clicked)
 
