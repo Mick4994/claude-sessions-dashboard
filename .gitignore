@@ -9,3 +9,7 @@ build/
 .ruff_cache/
 *.log
 config.local.ini
+
+# MemPalace (local palace config + entity overrides; per-project only)
+mempalace.yaml
+entities.json
