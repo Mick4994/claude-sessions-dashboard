@@ -194,9 +194,10 @@ def test_subtitle_fallback_idle_no_tool():
 # ---- Full metadata --------------------------------------------------
 
 
-def test_parse_session_metadata_status_defaults_to_unknown(tmp_path):
-    """TC-008: status must NOT be inferred from JSONL — always defaults to UNKNOWN
-    so the registry owns the only path to status changes."""
+def test_parse_session_metadata_status_defaults_to_idle(tmp_path):
+    """TC-008: status must NOT be inferred from JSONL — always defaults to IDLE
+    so the registry owns the only path to status changes. (UNKNOWN removed —
+    IDLE is the natural "no hook yet" state, shown as green.)"""
     p = tmp_path / "s.jsonl"
     entries = [
         {"type": "ai-title", "aiTitle": "T", "sessionId": "s"},
@@ -209,7 +210,7 @@ def test_parse_session_metadata_status_defaults_to_unknown(tmp_path):
     s = parse_session_metadata(
         jsonl_path=p, session_id="s", cwd="/repo", max_tokens=200_000, title_max=32, subtitle_max=40
     )
-    assert s.status == SessionStatus.UNKNOWN
+    assert s.status == SessionStatus.IDLE
 
 
 def test_parse_session_metadata_no_recent_seconds_param(tmp_path):

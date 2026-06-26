@@ -165,7 +165,7 @@ def test_post_unknown_event_returns_200_ignored(live_server):
     code, body = _post(port, "/hook/SomeWeirdEvent?sid=sess-test")
     assert code == 200
     assert body.get("ok") is True
-    assert reg.get(pid=4242).status == SessionStatus.UNKNOWN
+    assert reg.get(pid=4242).status == SessionStatus.IDLE
 
 
 # TC-016: unknown sid → 200 with note, no crash
@@ -174,7 +174,7 @@ def test_post_unknown_sid_returns_200_with_warn(live_server):
     code, body = _post(port, "/hook/Stop?sid=does-not-exist")
     assert code == 200
     assert body.get("note") == "unknown sid"
-    assert reg.get(pid=4242).status == SessionStatus.UNKNOWN
+    assert reg.get(pid=4242).status == SessionStatus.IDLE
 
 
 # TC-017: missing sid → 200 with note, no crash
@@ -183,7 +183,7 @@ def test_post_missing_sid_returns_200(live_server):
     code, body = _post(port, "/hook/Stop")
     assert code == 200
     assert body.get("note") == "missing sid"
-    assert reg.get(pid=4242).status == SessionStatus.UNKNOWN
+    assert reg.get(pid=4242).status == SessionStatus.IDLE
 
 
 # TC-018: GET → not 200 (BaseHTTPRequestHandler returns 501 for unregistered

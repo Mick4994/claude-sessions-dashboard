@@ -16,5 +16,5 @@ class Session:
     subtitle: str = ""
     context_pct: float = 0.0
     model: str = ""
-    status: SessionStatus = SessionStatus.UNKNOWN
+    status: SessionStatus = SessionStatus.IDLE
     last_activity_ts: float = 0.0

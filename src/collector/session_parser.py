@@ -230,7 +230,7 @@ def parse_session_metadata(
     subtitle_max: int,
 ) -> Session:
     """Parse tail of a JSONL file into a Session dataclass.
-    Status defaults to UNKNOWN — the registry updates it via hook events."""
+    Status defaults to IDLE — the registry updates it via hook events."""
     entries = _read_jsonl_tail(jsonl_path)
     actual_cwd = _latest_cwd(entries, cwd)
     title = _parse_title(entries, cwd=actual_cwd, max_chars=title_max)
@@ -251,6 +251,6 @@ def parse_session_metadata(
         subtitle=subtitle,
         context_pct=pct,
         model=model,
-        status=SessionStatus.UNKNOWN,
+        status=SessionStatus.IDLE,
         last_activity_ts=last_ts,
     )

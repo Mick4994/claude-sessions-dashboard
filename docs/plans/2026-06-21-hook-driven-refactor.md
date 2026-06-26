@@ -57,7 +57,7 @@
 | 6 | `PostToolUseFailure` | WORKING 🟡 |
 | 7 | `PermissionDenied` | WORKING 🟡 |
 
-**第 4 态 UNKNOWN（灰）**：进程发现但未收到任何 hook 时默认。
+**第 4 态已删除**：之前 UNKNOWN（灰）表示"进程发现但未收到任何 hook"。现已简化为：进程发现后**默认 IDLE（绿）**——直到首个 hook 改变状态为止。不再有灰色。
 
 **PERMISSION 不死锁机制**：60s 超时无新 hook → 自动回退 WORKING。
 
@@ -110,7 +110,7 @@
 
 | 文件 | 职责 |
 |------|------|
-| `src/core/status.py` | `Status` 枚举 (IDLE/WORKING/PERMISSION/UNKNOWN) + 颜色常量 |
+| `src/core/status.py` | `Status` 枚举 (IDLE/WORKING/PERMISSION) + 颜色常量 |
 | `src/core/session_registry.py` | 单例注册表，PID↔Session 映射，回调驱动 |
 | `src/server/hook_server.py` | aiohttp HTTP server，7 个 POST 端点 |
 | `src/server/router.py` | URL→registry 路由层 |

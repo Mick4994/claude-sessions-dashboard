@@ -10,12 +10,11 @@ from PySide6.QtWidgets import QWidget
 
 from ..collector.models import SessionStatus
 
-# 4-state map: IDLE 🟢 / WORKING 🟡 / PERMISSION 🔴 / UNKNOWN ⚪
+# 3-state map: IDLE 🟢 / WORKING 🟡 (blink) / PERMISSION 🔴
 _COLORS: dict[SessionStatus, QColor] = {
     SessionStatus.WORKING: QColor("#EAB308"),       # yellow
     SessionStatus.IDLE: QColor("#22C55E"),           # green
     SessionStatus.PERMISSION: QColor("#EF4444"),     # red
-    SessionStatus.UNKNOWN: QColor("#9CA3AF"),        # gray (initial, before first hook)
 }
 
 _BLINK_MS: dict[SessionStatus, int] = {

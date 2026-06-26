@@ -11,9 +11,8 @@ Floating always-on-top status bar for active Claude Code sessions — color-code
 | Status | Color | Trigger |
 |--------|-------|---------|
 | WORKING | 🟡 Yellow blink | `UserPromptSubmit` hook |
-| IDLE | 🟢 Green | `Stop` / `StopFailure` hook (includes ESC interrupt) |
+| IDLE | 🟢 Green | `Stop` / `StopFailure` hook (includes ESC interrupt). **Also the default** for newly-discovered sessions before any hook fires. |
 | PERMISSION | 🔴 Red | `PermissionRequest` hook |
-| UNKNOWN | ⚪ Gray | Initial state (before first hook) |
 
 ## Architecture
 
@@ -182,9 +181,8 @@ https://github.com/Mick4994/claude-sessions-dashboard
 | 状态 | 颜色 | 触发钩子 |
 |--------|-------|---------|
 | WORKING | 🟡 黄色闪烁 | `UserPromptSubmit` |
-| IDLE | 🟢 绿色 | `Stop` / `StopFailure`（含 ESC 中断） |
+| IDLE | 🟢 绿色 | `Stop` / `StopFailure`（含 ESC 中断）。**也是默认状态**：新发现的会话在收到首个 hook 之前即为绿色。 |
 | PERMISSION | 🔴 红色 | `PermissionRequest` |
-| UNKNOWN | ⚪ 灰色 | 初始状态（首次钩子前） |
 
 ## 架构
 

@@ -48,8 +48,8 @@ def test_router_unknown_event_returns_false():
     _registered(reg)
     router = HookRouter(reg)
     assert router.route("SomethingWeird", "sess-1") is False
-    # Status unchanged.
-    assert reg.get(pid=1).status == SessionStatus.UNKNOWN
+    # Status unchanged from default IDLE.
+    assert reg.get(pid=1).status == SessionStatus.IDLE
 
 
 def test_router_missing_sid_returns_false():
@@ -57,7 +57,7 @@ def test_router_missing_sid_returns_false():
     _registered(reg)
     router = HookRouter(reg)
     assert router.route("Stop", None) is False
-    assert reg.get(pid=1).status == SessionStatus.UNKNOWN
+    assert reg.get(pid=1).status == SessionStatus.IDLE
 
 
 def test_router_unknown_sid_returns_false():
@@ -65,7 +65,7 @@ def test_router_unknown_sid_returns_false():
     _registered(reg)
     router = HookRouter(reg)
     assert router.route("Stop", "nonexistent") is False
-    assert reg.get(pid=1).status == SessionStatus.UNKNOWN
+    assert reg.get(pid=1).status == SessionStatus.IDLE
 
 
 def test_router_permission_red_to_yellow_on_post_tool_use():
@@ -105,5 +105,5 @@ def test_router_routes_to_correct_pid_by_sid():
     _registered(reg, pid=2, sid="sess-B")
     router = HookRouter(reg)
     router.route("Stop", "sess-B")
-    assert reg.get(pid=1).status == SessionStatus.UNKNOWN
+    assert reg.get(pid=1).status == SessionStatus.IDLE
     assert reg.get(pid=2).status == SessionStatus.IDLE

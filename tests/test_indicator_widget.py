@@ -1,15 +1,11 @@
-"""Tests for indicator widget — 4-state color mapping + WORKING-only blink (Phase 3)."""
+"""Tests for indicator widget — 3-state color mapping + WORKING-only blink."""
 from PySide6.QtGui import QColor
 
 from src.collector.models import SessionStatus
 from src.ui.indicator_widget import IndicatorDot, status_blink_ms, status_color
 
 
-# TC-011: 4-state color map (UNKNOWN/IDLE/WORKING/PERMISSION).
-def test_color_unknown_is_gray():
-    assert status_color(SessionStatus.UNKNOWN) == QColor("#9CA3AF")
-
-
+# TC-011: 3-state color map (IDLE/WORKING/PERMISSION).
 def test_color_idle_is_green():
     assert status_color(SessionStatus.IDLE) == QColor("#22C55E")
 
@@ -33,10 +29,6 @@ def test_no_blink_for_idle():
 
 def test_no_blink_for_permission():
     assert status_blink_ms(SessionStatus.PERMISSION) == 0
-
-
-def test_no_blink_for_unknown():
-    assert status_blink_ms(SessionStatus.UNKNOWN) == 0
 
 
 # Widget integration

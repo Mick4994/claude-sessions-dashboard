@@ -1,21 +1,19 @@
-"""Tests for Session dataclass + SessionStatus enum (4-state after Phase 3 refactor)."""
+"""Tests for Session dataclass + SessionStatus enum (3-state after simplification)."""
 
 from src.collector.models import Session, SessionStatus
 
 
 def test_session_status_values():
-    """TC-008: SessionStatus has exactly 4 members after ERROR/STALE removal."""
-    assert SessionStatus.UNKNOWN.value == "unknown"
+    """SessionStatus has exactly 3 members — gray/UNKNOWN removed."""
     assert SessionStatus.IDLE.value == "idle"
     assert SessionStatus.WORKING.value == "working"
     assert SessionStatus.PERMISSION.value == "permission"
-    # Removed in Phase 3:
-    assert not hasattr(SessionStatus, "ERROR")
-    assert not hasattr(SessionStatus, "STALE")
+    # Removed in simplification:
+    assert not hasattr(SessionStatus, "UNKNOWN")
 
 
 def test_session_status_count():
-    assert len(SessionStatus) == 4
+    assert len(SessionStatus) == 3
 
 
 def test_session_minimal():
@@ -30,7 +28,7 @@ def test_session_minimal():
     assert s.subtitle == ""  # default
     assert s.context_pct == 0.0  # default
     assert s.model == ""  # default
-    assert s.status == SessionStatus.UNKNOWN  # default (changed from IDLE in Phase 3)
+    assert s.status == SessionStatus.IDLE  # default (newly-discovered sessions start green)
     assert s.last_activity_ts == 0.0  # default
 
 

@@ -23,7 +23,7 @@ class SessionEntry:
     cwd: Path
     session_id: str | None = None
     jsonl_path: Path | None = None
-    status: SessionStatus = SessionStatus.UNKNOWN
+    status: SessionStatus = SessionStatus.IDLE
 
 
 @dataclass
