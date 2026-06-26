@@ -193,8 +193,13 @@ def main() -> int:
                 client.readyRead.connect(lambda: _handle_ping(client))
 
         def _handle_ping(client):
-            _ = bytes(client.readAll()).decode("utf-8", "ignore").strip()
-            if window.isHidden():
+            msg = bytes(client.readAll()).decode("utf-8", "ignore").strip()
+            # 外部注入点击事件：socket 收到 "click <session_id>" 后转发到 signalBus
+            if msg.startswith("click "):
+                sid = msg[len("click "):].strip()
+                if sid:
+                    signalBus.cardClicked.emit(sid)
+            elif window.isHidden():
                 window.show()
             window.raise_()
             window.activateWindow()
