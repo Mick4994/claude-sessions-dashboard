@@ -7,6 +7,7 @@ import os
 if os.name == "nt":
     import ctypes
     import ctypes.wintypes as wt
+    import psutil
 
     _user32 = ctypes.WinDLL("user32", use_last_error=True)
     _EnumWindows = _user32.EnumWindows
@@ -27,8 +28,8 @@ if os.name == "nt":
     _TERMINAL_TITLES = ("Claude Code", "cmd.exe", "Windows Terminal", "PowerShell", "pwsh")
 
     def _find_window_for_process(target_pid: int) -> int | None:
-        """Walk all top-level windows via FindWindowEx (no callback — safe in any thread
-        context including pythonw). Return first visible HWND owned by target_pid."""
+        """Walk all top-level windows via FindWindowEx (no callback — safe in pythonw).
+        Return first visible HWND owned by target_pid."""
         hwnd = 0
         while True:
             hwnd = _FindWindowExW(0, hwnd, None, None)
@@ -45,8 +46,6 @@ if os.name == "nt":
         if pid <= 0:
             return None
         try:
-            import psutil
-
             p = psutil.Process(pid)
             for _ in range(4):
                 parent = p.parent()
@@ -97,8 +96,6 @@ if os.name == "nt":
         import time as _time
 
         # Simulate ALT key — grants foreground rights to the calling thread.
-        # This is the thread processing Qt's mousePressEvent, so foreground
-        # rights are available after the user clicked on our window.
         _user32.keybd_event(0x12, 0, 0, 0)  # VK_MENU down
         _user32.keybd_event(0x12, 0, 2, 0)  # VK_MENU up (KEYEVENTF_KEYUP=2)
 
