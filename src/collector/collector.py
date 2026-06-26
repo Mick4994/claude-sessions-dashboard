@@ -91,6 +91,7 @@ class SessionCollector(QObject):
                         jsonl_path=jsonl,
                         session_id=jsonl.stem,
                         cwd=sess_info["cwd"],
+                        pid=sess_info["pid"],
                         max_tokens=self._max_context_tokens,
                         title_max=self._title_truncate_chars,
                         subtitle_max=self._subtitle_truncate_chars,

@@ -96,9 +96,9 @@ class SessionRegistry:
     # -- mutations (sid-first, no PID required) -------------------------
 
     def register_by_sid(
-        self, session_id: str, cwd: Path, jsonl_path: Path | None = None
+        self, session_id: str, cwd: Path, *, pid: int = 0, jsonl_path: Path | None = None
     ) -> SessionEntry:
-        entry = SessionEntry(pid=0, cwd=cwd, session_id=session_id, jsonl_path=jsonl_path)
+        entry = SessionEntry(pid=pid, cwd=cwd, session_id=session_id, jsonl_path=jsonl_path)
         with self._lock:
             self._by_sid[session_id] = entry
         for cb in self._callbacks.added:

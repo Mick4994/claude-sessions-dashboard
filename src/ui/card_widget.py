@@ -111,6 +111,18 @@ class SessionCard(QFrame):
 
         self.setFixedHeight(78)
         self.setCursor(Qt.PointingHandCursor)
+        self._orig_stylesheet = self.styleSheet()
+
+    def enterEvent(self, ev) -> None:
+        self.setStyleSheet(
+            self._orig_stylesheet
+            + " #SessionCard { background: rgba(255,255,255,0.06); border-radius: 6px; }"
+        )
+        super().enterEvent(ev)
+
+    def leaveEvent(self, ev) -> None:
+        self.setStyleSheet(self._orig_stylesheet)
+        super().leaveEvent(ev)
 
     def update_session(self, session: Session) -> None:
         self.session = session

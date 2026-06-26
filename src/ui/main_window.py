@@ -6,12 +6,13 @@ from __future__ import annotations
 from PySide6.QtCore import QPoint, QPropertyAnimation, Qt, QTimer
 from PySide6.QtWidgets import (
     QApplication,
+    QLabel,
     QMainWindow,
     QVBoxLayout,
     QWidget,
 )
 
-from ..collector.models import Session
+from ..collector.models import Session, SessionStatus
 from .card_widget import SessionCard
 from .indicator_widget import IndicatorDot
 from .signal_bus import signalBus
@@ -82,11 +83,14 @@ class MainWindow(QMainWindow):
     def _fit_height(self) -> None:
         n = max(1, len(self._sessions))
         if self._expanded:
-            h = (
-                self.PADDING * 2
-                + len(self._sessions) * self.CARD_HEIGHT
-                + max(0, len(self._sessions) - 1) * self.CARD_SPACING
-            )
+            if not self._sessions:
+                h = 80
+            else:
+                h = (
+                    self.PADDING * 2
+                    + len(self._sessions) * self.CARD_HEIGHT
+                    + max(0, len(self._sessions) - 1) * self.CARD_SPACING
+                )
         else:
             h = self.PADDING * 2 + n * self.INDICATOR_ROW + (n - 1) * 4
         h = max(60, h)
@@ -104,6 +108,26 @@ class MainWindow(QMainWindow):
 
     def _rebuild(self) -> None:
         self._clear_inner()
+        if not self._sessions:
+            if self._expanded:
+                label = QLabel(
+                    "无活跃 Claude Code 会话\n启动 CC 后可在此查看会话状态"
+                )
+                label.setAlignment(Qt.AlignCenter)
+                label.setStyleSheet(
+                    "color: rgba(180,180,190,0.7);"
+                    "padding: 12px 0;"
+                )
+                label.setWordWrap(True)
+                self._inner.addWidget(label, 0, Qt.AlignCenter)
+            else:
+                # Breathing dot — not clickable (no session_id).
+                dot = IndicatorDot(SessionStatus.IDLE, size_px=10)
+                dot.setToolTip("暂无活跃 Claude Code 会话")
+                self._inner.addWidget(dot, 0, Qt.AlignCenter)
+            self._inner.addStretch(0)
+            return
+
         if self._expanded:
             for s in self._sessions:
                 card = SessionCard(s)
@@ -111,7 +135,7 @@ class MainWindow(QMainWindow):
                 self._inner.addWidget(card)
         else:
             for s in self._sessions:
-                dot = IndicatorDot(s.status, size_px=12)
+                dot = IndicatorDot(s.status, size_px=12, session_id=s.id)
                 dot.setToolTip(
                     f"{s.title or '(untitled)'}\n{s.subtitle or ''}\n{int(s.context_pct)}%"
                 )

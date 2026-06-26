@@ -12,6 +12,7 @@ class Session:
     id: str
     jsonl_path: str
     cwd: str
+    pid: int = 0
     title: str = ""
     subtitle: str = ""
     context_pct: float = 0.0

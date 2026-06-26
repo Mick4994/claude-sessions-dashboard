@@ -85,6 +85,7 @@ def main() -> int:
             if s.id not in existing_sids:
                 registry.register_by_sid(
                     session_id=s.id,
+                    pid=s.pid,
                     cwd=Path(s.cwd) if s.cwd else Path("."),
                     jsonl_path=Path(s.jsonl_path) if s.jsonl_path else None,
                 )
@@ -127,16 +128,19 @@ def main() -> int:
 
     # -- card click → activate CC terminal --
     def on_card_clicked(session_id: str):
-        sessions = collector.current_sessions()
-        sess = next((s for s in sessions if s.id == session_id), None)
-        if sess is None:
-            return
-        if os.name == "nt":
-            from src.win32.windows_focus import activate_window, find_terminal_for_cwd
-
-            hwnd = find_terminal_for_cwd(sess.cwd)
-            if hwnd:
-                activate_window(hwnd)
+        hwnd = None
+        # Prefer PID-based window lookup (robust to title changes).
+        entry = registry.get_by_sid(session_id)
+        if entry and entry.pid:
+            hwnd = find_terminal_for_pid(entry.pid)
+        # Fallback: CWD-based title matching.
+        if hwnd is None:
+            sessions = collector.current_sessions()
+            sess = next((s for s in sessions if s.id == session_id), None)
+            if sess and sess.cwd:
+                hwnd = find_terminal_for_cwd(sess.cwd)
+        if hwnd:
+            activate_window(hwnd)
 
     signalBus.cardClicked.connect(on_card_clicked)
 

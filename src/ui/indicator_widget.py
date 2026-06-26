@@ -33,14 +33,25 @@ def status_blink_ms(s: SessionStatus) -> int:
 class IndicatorDot(QWidget):
     """Circular status indicator with optional blink animation."""
 
-    def __init__(self, status: SessionStatus, *, size_px: int = 12, parent=None) -> None:
+    def __init__(
+        self,
+        status: SessionStatus,
+        *,
+        size_px: int = 12,
+        session_id: str | None = None,
+        parent=None,
+    ) -> None:
         super().__init__(parent)
-        self.setFixedSize(size_px + 6, size_px + 6)
+        e = max(4, size_px + 6)
+        self.setFixedSize(e, e)
         self._size_px = size_px
+        self._session_id = session_id
         self._color = status_color(status)
         self._opacity = 1.0
         self._timer: QTimer | None = None
         self._period_ms = 0
+        self._hover = False
+        self.setMouseTracking(True)
         self.set_status(status)
 
     @property
@@ -52,6 +63,23 @@ class IndicatorDot(QWidget):
         self.__period_ms = value
 
     _period_ms = property(lambda self: self.__period_ms, _period_ms.fset)
+
+    def enterEvent(self, ev) -> None:
+        self._hover = True
+        self.update()
+        super().enterEvent(ev)
+
+    def leaveEvent(self, ev) -> None:
+        self._hover = False
+        self.update()
+        super().leaveEvent(ev)
+
+    def mousePressEvent(self, ev) -> None:
+        if ev.button() == Qt.LeftButton and self._session_id:
+            from .signal_bus import signalBus
+
+            signalBus.cardClicked.emit(self._session_id)
+        super().mousePressEvent(ev)
 
     def set_status(self, s: SessionStatus) -> None:
         self._color = status_color(s)
@@ -80,13 +108,13 @@ class IndicatorDot(QWidget):
         c.setAlphaF(max(0.2, min(1.0, self._opacity)))
         p.setBrush(QBrush(c))
         p.setPen(Qt.NoPen)
-        w = min(self.width(), self.height())
-        r = w / 2
-        cx = w / 2
+        eff = self._size_px + 2 if self._hover else self._size_px
+        rr = eff / 2
+        cx = self.width() / 2
         cy = self.height() / 2
-        p.drawEllipse(int(cx - r), int(cy - r), int(r * 2), int(r * 2))
+        p.drawEllipse(int(cx - rr), int(cy - rr), int(rr * 2), int(rr * 2))
         # inner highlight
         hl = QColor(255, 255, 255, 60)
         p.setBrush(QBrush(hl))
-        p.drawEllipse(int(cx - r * 0.55), int(cy - r * 0.7), int(r * 0.6), int(r * 0.45))
+        p.drawEllipse(int(cx - rr * 0.55), int(cy - rr * 0.7), int(rr * 0.6), int(rr * 0.45))
         p.end()

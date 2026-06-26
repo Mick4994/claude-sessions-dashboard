@@ -19,6 +19,41 @@ if os.name == "nt":
 
     _TERMINAL_TITLES = ("Claude Code", "cmd.exe", "Windows Terminal", "PowerShell", "pwsh")
 
+    def _find_window_for_process(target_pid: int) -> int | None:
+        """EnumWindows → match GetWindowThreadProcessId → return first visible HWND."""
+        found: list[int] = []
+
+        def cb(hwnd, _lparam):
+            pid = wt.DWORD()
+            _user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+            if pid.value == target_pid and _IsWindowVisible(hwnd):
+                found.append(hwnd)
+                return False
+            return True
+
+        _EnumWindows(_EnumWindowsProc(cb), 0)
+        return found[0] if found else None
+
+    def find_terminal_for_pid(pid: int) -> int | None:
+        """Walk the parent chain of a CC process to find its terminal window."""
+        if pid <= 0:
+            return None
+        try:
+            import psutil
+
+            p = psutil.Process(pid)
+            for _ in range(4):
+                parent = p.parent()
+                if parent is None:
+                    break
+                hwnd = _find_window_for_process(parent.pid)
+                if hwnd:
+                    return hwnd
+                p = parent
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            pass
+        return None
+
     def find_terminal_for_cwd(cwd: str) -> int | None:
         if not cwd:
             return None
