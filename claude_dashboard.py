@@ -58,6 +58,12 @@ def main() -> int:
     app.setApplicationName("Claude Sessions Dashboard")
     app.setQuitOnLastWindowClosed(False)
 
+    # Version stamp — written on every startup so we know which code is running.
+    import datetime as _dt
+    _ver = Path(os.environ.get("TEMP", ".")) / "csd_click_debug.log"
+    with open(_ver, "a") as _vf:
+        _vf.write(f"\n=== DASHBOARD STARTUP {_dt.datetime.now():%Y-%m-%d %H:%M:%S} commit=37906b6 ===\n")
+
     # -- registry (session_id-keyed, thread-safe) --
     registry = SessionRegistry()
 
