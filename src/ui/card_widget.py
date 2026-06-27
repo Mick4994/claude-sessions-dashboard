@@ -184,7 +184,10 @@ class SessionCard(QFrame):
         if hasattr(_top, "set_menu_open"):
             _top.set_menu_open(True)
         try:
-            menu = QMenu(self)
+            # parent 设成主窗口而不是 self（卡片）：
+            # collector 每 2s 轮询会触发 _rebuild -> deleteLater() 卡片，
+            # 卡片若作为菜单 parent 会被一起回收，Qt 自动 dismiss 弹出的菜单。
+            menu = QMenu(_top)
             # 请求父组件填充终端列表
             self.listTerminalsRequested.emit(self.session.id)
             if self._terminals:
