@@ -59,10 +59,19 @@ def main() -> int:
     app.setQuitOnLastWindowClosed(False)
 
     # Version stamp — written on every startup so we know which code is running.
-    import datetime as _dt
+    import datetime as _dt, subprocess as _sp
     _ver = Path(os.environ.get("TEMP", ".")) / "csd_click_debug.log"
+    try:
+        _commit = _sp.check_output(
+            ["git", "rev-parse", "--short", "HEAD"],
+            cwd=str(Path(__file__).parent),
+            stderr=_sp.DEVNULL,
+            text=True,
+        ).strip()
+    except Exception:
+        _commit = "unknown"
     with open(_ver, "a") as _vf:
-        _vf.write(f"\n=== DASHBOARD STARTUP {_dt.datetime.now():%Y-%m-%d %H:%M:%S} commit=37906b6 ===\n")
+        _vf.write(f"\n=== DASHBOARD STARTUP {_dt.datetime.now():%Y-%m-%d %H:%M:%S} commit={_commit} ===\n")
 
     # -- registry (session_id-keyed, thread-safe) --
     registry = SessionRegistry()
