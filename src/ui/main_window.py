@@ -120,6 +120,20 @@ class MainWindow(QMainWindow):
         """仅刷新内存缓存（不刷 UI），用于右键菜单判断当前卡片是否已配对。"""
         self._paired_ids_cache = set(paired_ids)
 
+    def set_menu_open(self, is_open: bool) -> None:
+        """卡片右键菜单显示/关闭时调用，抑制 leaveEvent 触发的自动收起。"""
+        self._menu_open = bool(is_open)
+
+    def collapse_after_menu(self) -> None:
+        """菜单关闭后，如果鼠标还在 dashboard 外，启动一次收起计时。"""
+        if not getattr(self, "_menu_open", False):
+            # 如果期间菜单又关了但鼠标也回来了，就别收——leaveEvent 早晚会触发
+            # 这里只在鼠标仍在外部时主动收一次（防止菜单关闭后卡在展开态）
+            under_mouse = self.underMouse()
+            if not under_mouse:
+                self._expand_timer.stop()
+                self._collapse_timer.start(self._collapse_delay_ms)
+
     def _fit_height(self) -> None:
         n = max(1, len(self._sessions))
         if self._expanded:
@@ -193,6 +207,9 @@ class MainWindow(QMainWindow):
         self._expand_timer.start(self._expand_delay_ms)
 
     def leaveEvent(self, _ev) -> None:
+        if getattr(self, "_menu_open", False):
+            # 右键菜单显示期间不要收起，否则菜单会跑到收起后的窄条下面点不到
+            return
         self._expand_timer.stop()
         self._collapse_timer.start(self._collapse_delay_ms)
 

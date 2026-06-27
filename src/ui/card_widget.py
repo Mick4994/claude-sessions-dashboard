@@ -179,37 +179,50 @@ class SessionCard(QFrame):
 
     # ---- right-click context menu ----
     def contextMenuEvent(self, ev) -> None:
-        menu = QMenu(self)
-        # 请求父组件填充终端列表
-        self.listTerminalsRequested.emit(self.session.id)
-        if self._terminals:
-            header = menu.addAction(f"配对到终端（{len(self._terminals)} 个可见）")
-            header.setEnabled(False)
-            menu.addSeparator()
-            for t in self._terminals:
-                _label = t["title"] or "(无标题)"
-                if len(_label) > 40:
-                    _label = _label[:37] + "..."
-                _act = menu.addAction(
-                    f"{_label}    [{t['class']}, {t['width']}×{t['height']}]"
-                )
-                # 用闭包捕获当前 terminal 的字段
-                _act.triggered.connect(
-                    lambda _checked=False, tw=t: self.pairRequested.emit(
-                        self.session.id, tw["hwnd"], tw["title"], tw["class"]
+        # 通知主窗口：菜单要开了，leaveEvent 不要收
+        _top = self.window()
+        if hasattr(_top, "set_menu_open"):
+            _top.set_menu_open(True)
+        try:
+            menu = QMenu(self)
+            # 请求父组件填充终端列表
+            self.listTerminalsRequested.emit(self.session.id)
+            if self._terminals:
+                header = menu.addAction(f"配对到终端（{len(self._terminals)} 个可见）")
+                header.setEnabled(False)
+                menu.addSeparator()
+                for t in self._terminals:
+                    _label = t["title"] or "(无标题)"
+                    if len(_label) > 40:
+                        _label = _label[:37] + "..."
+                    _act = menu.addAction(
+                        f"{_label}    [{t['class']}, {t['width']}×{t['height']}]"
                     )
+                    # 用闭包捕获当前 terminal 的字段
+                    _act.triggered.connect(
+                        lambda _checked=False, tw=t: self.pairRequested.emit(
+                            self.session.id, tw["hwnd"], tw["title"], tw["class"]
+                        )
+                    )
+            else:
+                _none = menu.addAction("(当前没有可见的终端窗口)")
+                _none.setEnabled(False)
+            menu.addSeparator()
+            # 取消配对
+            if self._is_paired:
+                _unpair = menu.addAction("取消配对")
+                _unpair.triggered.connect(
+                    lambda _checked=False: self.unpairRequested.emit(self.session.id)
                 )
-        else:
-            _none = menu.addAction("(当前没有可见的终端窗口)")
-            _none.setEnabled(False)
-        menu.addSeparator()
-        # 取消配对
-        if self._is_paired:
-            _unpair = menu.addAction("取消配对")
-            _unpair.triggered.connect(
-                lambda _checked=False: self.unpairRequested.emit(self.session.id)
-            )
-        menu.exec(ev.globalPos())
+            menu.exec(ev.globalPos())
+        finally:
+            # 菜单关了，恢复 leaveEvent 行为；如鼠标仍在外则启动一次收起计时
+            if hasattr(_top, "set_menu_open"):
+                _top.set_menu_open(False)
+            if hasattr(_top, "collapse_after_menu"):
+                # 用 QTimer.singleShot 0 延后到事件循环下一拍，避免和 exec 退出事件打架
+                from PySide6.QtCore import QTimer as _QT
+                _QT.singleShot(0, _top.collapse_after_menu)
 
     def set_terminals(self, terminals: list[dict], is_paired: bool) -> None:
         """由父组件在 listTerminalsRequested 后回调注入终端列表。"""
