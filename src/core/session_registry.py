@@ -154,9 +154,23 @@ class SessionRegistry:
             return pid in self._by_pid
 
     def iter_all(self) -> Iterator[SessionEntry]:
+        # 一个 SessionEntry 可能同时挂在两个 index 里（register + attach_session_id
+        # 会让同一对象进 _by_pid 和 _by_sid）；但 dashboard 主要走 register_by_sid
+        # 只写 _by_sid。两条路径都要看到，否则 _sync_registry 会每个扫描周期重复
+        # 注册并把 entry.status 重置回默认值，进而让 Stop 的 IDLE 跟 reset 后的 IDLE
+        # 撞上 identity guard，callback 不触发、UI 永远卡黄。
         with self._lock:
-            entries = list(self._by_pid.values())
-        yield from entries
+            seen: set[int] = set()
+            result: list[SessionEntry] = []
+            for e in self._by_pid.values():
+                if id(e) not in seen:
+                    seen.add(id(e))
+                    result.append(e)
+            for e in self._by_sid.values():
+                if id(e) not in seen:
+                    seen.add(id(e))
+                    result.append(e)
+        yield from result
 
     def __len__(self) -> int:
         with self._lock:

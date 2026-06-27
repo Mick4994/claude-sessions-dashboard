@@ -196,3 +196,31 @@ def test_unregister_removes_from_sid_index():
     assert reg.get_by_sid("sess-Z") is not None
     reg.unregister(pid=42)
     assert reg.get_by_sid("sess-Z") is None
+
+
+def test_iter_all_sees_sid_only_entries():
+    """Regression: dashboard registers via register_by_sid (no register(pid)),
+    so _by_pid is empty. iter_all must still see the entries — otherwise
+    _sync_registry re-registers every scan and resets entry.status to IDLE,
+    which collides with Stop's IDLE on the identity guard and breaks the
+    yellow→green transition."""
+    reg = SessionRegistry()
+    reg.register_by_sid(session_id="sess-A", cwd=Path("C:/a"), pid=100)
+    reg.register_by_sid(session_id="sess-B", cwd=Path("C:/b"), pid=101)
+    snap = list(reg.iter_all())
+    assert {e.session_id for e in snap} == {"sess-A", "sess-B"}
+    # Simulate _sync_registry: existing_sids must include both, otherwise
+    # they would be re-registered (and their status overwritten).
+    existing_sids = {e.session_id for e in reg.iter_all() if e.session_id}
+    assert existing_sids == {"sess-A", "sess-B"}
+
+
+def test_iter_all_dedups_dual_index_entries():
+    """register(pid) + attach_session_id puts the SAME entry in both indices;
+    iter_all must yield it exactly once."""
+    reg = SessionRegistry()
+    entry = reg.register(pid=50, cwd=Path("C:/x"))
+    reg.attach_session_id(pid=50, session_id="sess-X")
+    snap = list(reg.iter_all())
+    assert len(snap) == 1
+    assert snap[0] is entry
