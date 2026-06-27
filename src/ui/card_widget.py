@@ -3,7 +3,10 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import Qt, Signal
+import datetime as _dt
+import os
+
+from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtGui import QAction, QColor, QFont
 from PySide6.QtWidgets import (
     QFrame,
@@ -38,13 +41,38 @@ def _shorten_cwd(cwd: str) -> str:
     return "/".join(cwd.replace("\\", "/").split("/")[-3:])
 
 
+def _cw_log(tag: str, msg: str) -> None:
+    """card_widget.py 专用日志，落 %TEMP%/csd_click_debug.log。"""
+    try:
+        _p = os.environ.get("TEMP", ".") + os.sep + "csd_click_debug.log"
+        with open(_p, "a", encoding="utf-8") as _f:
+            _f.write(f"{_dt.datetime.now():%H:%M:%S.%f} [cw:{tag}] {msg}\n")
+    except Exception:
+        pass
+
+
+def _format_terminal_label(t: dict, is_paired: bool, paired_hwnd: int | None) -> str:
+    """构造 QMenuAction 文本：✓/空格 + PID + 标题 + class/尺寸。"""
+    _title = t.get("title") or "(无标题)"
+    if len(_title) > 40:
+        _title = _title[:37] + "..."
+    _pid = t.get("pid", 0)
+    _cls = t.get("class", "")
+    _w = t.get("width", 0)
+    _h = t.get("height", 0)
+    _check = "✓" if is_paired else " "
+    _pid_str = f"PID {_pid}"
+    return f"{_check} {_pid_str:<10}  {_title}    [{_cls}, {_w}×{_h}]"
+
+
 class SessionCard(QFrame):
     """Expanded card widget for one Claude Code session."""
 
     clicked = Signal(str)  # session_id
     pairRequested = Signal(str, int, str, str)  # session_id, hwnd, title, class_name
     unpairRequested = Signal(str)  # session_id
-    listTerminalsRequested = Signal(str)  # session_id（请求父组件提供可见终端列表）
+    # 携带 Session 对象，让 MainWindow 能直接查 title/subtitle 过滤终端
+    listTerminalsRequested = Signal(object)  # session
 
     def __init__(self, session: Session, *, parent=None) -> None:
         super().__init__(parent)
@@ -116,8 +144,11 @@ class SessionCard(QFrame):
         self.setFixedHeight(78)
         self.setCursor(Qt.PointingHandCursor)
         self._orig_stylesheet = self.styleSheet()
+        # 终端列表（按 session 过滤后）+ 元数据
         self._terminals: list[dict] = []
-        self._is_paired = False
+        self._fallback_to_all: bool = False
+        self._paired_hwnd: int | None = None
+        self._is_paired: bool = False
         self._paired_dot = None  # 在 set_paired() 第一次调用时初始化
 
     def enterEvent(self, ev) -> None:
@@ -179,6 +210,8 @@ class SessionCard(QFrame):
 
     # ---- right-click context menu ----
     def contextMenuEvent(self, ev) -> None:
+        _sid = self.session.id
+        _cw_log("cm", f"enter sid={_sid} title={self.session.title!r} subtitle={self.session.subtitle!r}")
         # 通知主窗口：菜单要开了，leaveEvent 不要收
         _top = self.window()
         if hasattr(_top, "set_menu_open"):
@@ -188,28 +221,47 @@ class SessionCard(QFrame):
             # collector 每 2s 轮询会触发 _rebuild -> deleteLater() 卡片，
             # 卡片若作为菜单 parent 会被一起回收，Qt 自动 dismiss 弹出的菜单。
             menu = QMenu(_top)
-            # 请求父组件填充终端列表
-            self.listTerminalsRequested.emit(self.session.id)
-            if self._terminals:
-                header = menu.addAction(f"配对到终端（{len(self._terminals)} 个可见）")
-                header.setEnabled(False)
-                menu.addSeparator()
-                for t in self._terminals:
-                    _label = t["title"] or "(无标题)"
-                    if len(_label) > 40:
-                        _label = _label[:37] + "..."
-                    _act = menu.addAction(
-                        f"{_label}    [{t['class']}, {t['width']}×{t['height']}]"
-                    )
-                    # 用闭包捕获当前 terminal 的字段
-                    _act.triggered.connect(
-                        lambda _checked=False, tw=t: self.pairRequested.emit(
-                            self.session.id, tw["hwnd"], tw["title"], tw["class"]
-                        )
-                    )
+            # 请求父组件按 session 过滤 + 查配对后回填终端列表
+            self.listTerminalsRequested.emit(self.session)
+            _cw_log(
+                "cm",
+                f"after listTerminalsRequested: terminals={len(self._terminals)} "
+                f"fallback_to_all={self._fallback_to_all} paired_hwnd={self._paired_hwnd}",
+            )
+
+            if self._fallback_to_all:
+                _hdr = menu.addAction(
+                    f"（无匹配项，显示全部 {len(self._terminals)} 个终端）"
+                )
+                _hdr.setEnabled(False)
             else:
-                _none = menu.addAction("(当前没有可见的终端窗口)")
-                _none.setEnabled(False)
+                _hdr = menu.addAction(
+                    f"配对到终端（{len(self._terminals)} 个匹配）"
+                )
+                _hdr.setEnabled(False)
+            menu.addSeparator()
+
+            for t in self._terminals:
+                _is_paired_here = (t["hwnd"] == self._paired_hwnd)
+                _act = QAction(
+                    _format_terminal_label(t, _is_paired_here, self._paired_hwnd),
+                    menu,
+                )
+                _act.setCheckable(True)
+                _act.setChecked(_is_paired_here)
+                # 用闭包捕获当前 terminal 的字段
+                _act.triggered.connect(
+                    lambda _checked=False, tw=t: self.pairRequested.emit(
+                        self.session.id, tw["hwnd"], tw["title"], tw["class"]
+                    )
+                )
+                _cw_log(
+                    "cm",
+                    f"  add item hwnd={t['hwnd']} pid={t['pid']} cls={t['class']} "
+                    f"title={t['title'][:30]!r} paired={_is_paired_here}",
+                )
+                menu.addAction(_act)
+
             menu.addSeparator()
             # 取消配对
             if self._is_paired:
@@ -217,18 +269,36 @@ class SessionCard(QFrame):
                 _unpair.triggered.connect(
                     lambda _checked=False: self.unpairRequested.emit(self.session.id)
                 )
-            menu.exec(ev.globalPos())
+            _chosen = menu.exec(ev.globalPos())
+            if _chosen is not None:
+                # 用户选了某项（不包括 separator / header）
+                _cw_log("cm", f"user picked: {_chosen.text()!r}")
+            else:
+                _cw_log("cm", f"menu closed without selection")
         finally:
             # 菜单关了，恢复 leaveEvent 行为；如鼠标仍在外则启动一次收起计时
             if hasattr(_top, "set_menu_open"):
                 _top.set_menu_open(False)
             if hasattr(_top, "collapse_after_menu"):
                 # 用 QTimer.singleShot 0 延后到事件循环下一拍，避免和 exec 退出事件打架
-                from PySide6.QtCore import QTimer as _QT
-                _QT.singleShot(0, _top.collapse_after_menu)
+                QTimer.singleShot(0, _top.collapse_after_menu)
 
-    def set_terminals(self, terminals: list[dict], is_paired: bool) -> None:
-        """由父组件在 listTerminalsRequested 后回调注入终端列表。"""
-        self._terminals = terminals
-        self._is_paired = is_paired
-        self.set_paired(is_paired)
+    def set_terminals(
+        self,
+        terminals: list[dict],
+        fallback_to_all: bool,
+        paired_hwnd: int | None,
+        is_paired: bool,
+    ) -> None:
+        """由父组件在 listTerminalsRequested 后回调注入终端列表 + 元数据。"""
+        self._terminals = list(terminals)
+        self._fallback_to_all = bool(fallback_to_all)
+        self._paired_hwnd = paired_hwnd
+        self._is_paired = bool(is_paired)
+        # 更新右上角小圆点
+        _title = ""
+        for _t in self._terminals:
+            if _t["hwnd"] == self._paired_hwnd:
+                _title = _t.get("title", "")
+                break
+        self.set_paired(self._is_paired, _title)

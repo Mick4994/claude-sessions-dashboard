@@ -149,7 +149,7 @@ def main() -> int:
         _ids = set(_pairs.keys())
         _titles = {sid: p.get("title", "") for sid, p in _pairs.items()}
         window.set_paired_sessions(_ids, _titles)
-        window.set_paired_cache(_ids)
+        window.set_paired_cache(_pairs)
 
     # -- hook server --
     router = HookRouter(registry)
@@ -172,61 +172,90 @@ def main() -> int:
         import traceback as _tb
 
         _log = Path(os.environ.get("TEMP", ".")) / "csd_click_debug.log"
+        _sid8 = session_id[:8]
 
         def _w(msg: str) -> None:
+            # 每行带 [_sid8] 前缀，方便 grep 单 session 的全链路
             with open(_log, "a", encoding="utf-8") as _f:
-                _f.write(f"{_dt.datetime.now():%H:%M:%S.%f} {msg}\n")
+                _f.write(f"{_dt.datetime.now():%H:%M:%S.%f} [{_sid8}] {msg}\n")
 
+        hwnd_source: str = "none"  # 标注最终 hwnd 来自哪条路径
         try:
             _w(f"cardClicked sid={session_id}")
             hwnd: int | None = None
             entry = registry.get_by_sid(session_id)
+            _w(f"  entry={entry!r}")
             # 1. 先看手动配对缓存（最高优先级）
             pair = pairing_store.get(session_id)
-            if pair:
-                _w(f"  pair cache: hwnd={pair['hwnd']} title={pair['title']!r}")
+            if pair is not None:
+                _w(
+                    f"  pair cache HIT: hwnd={pair['hwnd']} "
+                    f"title={pair['title']!r} class={pair['class']!r}"
+                )
                 if is_window_valid(pair["hwnd"]):
                     hwnd = pair["hwnd"]
+                    hwnd_source = "pair_cache"
                     _w(f"  pair cache hwnd still valid -> {hwnd}")
                 else:
                     # hwnd 失效（WT 重启等），按 title 重新找
+                    _w(f"  pair cache hwnd STALE, try title re-resolution")
+                    _rescued = False
                     for t in list_visible_terminals():
                         if t["title"] == pair["title"] and t["class"] == pair["class"]:
                             hwnd = t["hwnd"]
                             pairing_store.set(session_id, hwnd, t["title"], t["class"])
-                            _w(f"  pair cache hwnd stale, re-resolved by title -> {hwnd}")
+                            hwnd_source = "pair_cache_rescued_by_title"
+                            _w(
+                                f"  pair cache rescued by title match -> hwnd={hwnd} "
+                                f"(cache updated)"
+                            )
+                            _rescued = True
                             break
-                    if hwnd is None:
-                        _w(f"  pair cache stale + title miss")
+                    if not _rescued:
+                        _w(f"  pair cache stale + title miss -> fall through to auto-detect")
+            else:
+                _w(f"  pair cache MISS (no entry in store)")
             if hwnd is None and entry and entry.pid:
-                _w(f"  entry.pid={entry.pid}")
+                _w(f"  try pid-based: entry.pid={entry.pid}")
                 hwnd = find_terminal_for_pid(entry.pid)
+                if hwnd is not None:
+                    hwnd_source = "pid"
                 _w(f"  find_terminal_for_pid({entry.pid}) -> hwnd={hwnd}")
             if hwnd is None:
                 sessions = collector.current_sessions()
                 sess = next((s for s in sessions if s.id == session_id), None)
                 if sess:
-                    # 优先按 session 标题（JSONL 里的项目名/任务名）匹配 WT pane 标题
+                    _w(
+                        f"  fallback chain: title={sess.title!r} "
+                        f"subtitle={sess.subtitle!r} cwd={sess.cwd!r}"
+                    )
                     if sess.title:
                         hwnd = find_terminal_for_title(sess.title)
-                        _w(f"  find_terminal_for_title({sess.title!r}) -> hwnd={hwnd}")
-                    # 标题对不上时试 subtitle——通常是完整的项目名
+                        if hwnd is not None:
+                            hwnd_source = "title"
+                        _w(f"  find_terminal_for_title(title) -> hwnd={hwnd}")
                     if hwnd is None and sess.subtitle:
                         hwnd = find_terminal_for_title(sess.subtitle)
-                        _w(f"  find_terminal_for_title(subtitle={sess.subtitle!r}) -> hwnd={hwnd}")
-                    # 退化：按进程 cwd basename 匹配
+                        if hwnd is not None:
+                            hwnd_source = "subtitle"
+                        _w(f"  find_terminal_for_title(subtitle) -> hwnd={hwnd}")
                     if hwnd is None and sess.cwd:
                         hwnd = find_terminal_for_cwd(sess.cwd)
-                        _w(f"  find_terminal_for_cwd({sess.cwd!r}) -> hwnd={hwnd}")
-                    # 兜底：最大可见终端窗口——至少激活点什么
+                        if hwnd is not None:
+                            hwnd_source = "cwd"
+                        _w(f"  find_terminal_for_cwd -> hwnd={hwnd}")
                     if hwnd is None:
                         hwnd = _find_largest_visible_terminal()
+                        hwnd_source = "largest_fallback"
                         _w(f"  _find_largest_visible_terminal -> hwnd={hwnd}")
+                else:
+                    _w(f"  no session object found in collector")
             if hwnd:
+                _w(f"  FINAL hwnd={hwnd} (source={hwnd_source}) → activate")
                 ok = activate_window(hwnd)
                 _w(f"  activate_window({hwnd}) -> {ok}")
             else:
-                _w(f"  NO hwnd for sid={session_id}")
+                _w(f"  NO hwnd for sid={session_id} (source={hwnd_source})")
         except Exception:
             # 任何异常（NameError / psutil.NoSuchProcess / ctypes.ArgumentError / OSError ...）
             # 都要落盘，不能再让"异常被吞"成为隐藏 bug 的根源。

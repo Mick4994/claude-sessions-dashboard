@@ -27,10 +27,9 @@ class MainWindow(QMainWindow):
     PADDING = 8
     INDICATOR_ROW = 22
 
-    # 卡片请求配对/取消配对/列出终端时，主窗口把它们再转出去给主程序处理
+    # 卡片请求配对/取消配对时，主窗口把它们再转出去给主程序处理
     cardPairRequested = Signal(str, int, str, str)  # session_id, hwnd, title, class_name
     cardUnpairRequested = Signal(str)
-    cardListTerminalsRequested = Signal(str)
 
     def __init__(self, *, expand_delay_ms: int = 200, collapse_delay_ms: int = 500) -> None:
         super().__init__()
@@ -107,18 +106,32 @@ class MainWindow(QMainWindow):
                 return _w
         return None
 
-    def _on_card_list_terminals(self, sid: str) -> None:
-        """卡片右键请求列出终端窗口——自己查 wf.list_visible_terminals 并回填到那张卡片。"""
-        _card = self._find_card(sid)
+    def _on_card_list_terminals(self, session) -> None:
+        """卡片右键请求列出终端窗口——按 session.title/subtitle 过滤、配对项置顶。
+
+        完整数据流：卡片发 listTerminalsRequested(session) -> 本方法
+        查 pairing_store 取 paired_hwnd -> wf.list_terminals_for_session 过滤
+        -> 回填到对应卡片（_card.set_terminals）
+        """
+        _card = self._find_card(session.id)
         if _card is None:
             return
-        _terms = wf.list_visible_terminals()
-        _is_paired = sid in (self._paired_ids_cache or set())
-        _card.set_terminals(_terms, _is_paired)
+        _pair = self._paired_pairs_cache.get(session.id) if hasattr(self, "_paired_pairs_cache") else None
+        _paired_hwnd = _pair.get("hwnd") if _pair else None
+        _terms, _fallback = wf.list_terminals_for_session(
+            session.title or None,
+            session.subtitle or None,
+            _paired_hwnd,
+        )
+        _is_paired = session.id in (self._paired_ids_cache or set())
+        _card.set_terminals(_terms, _fallback, _paired_hwnd, _is_paired)
 
-    def set_paired_cache(self, paired_ids: set[str]) -> None:
-        """仅刷新内存缓存（不刷 UI），用于右键菜单判断当前卡片是否已配对。"""
-        self._paired_ids_cache = set(paired_ids)
+    def set_paired_cache(self, paired_pairs: dict[str, dict]) -> None:
+        """刷新内存缓存（sid → {hwnd, title, class, paired_at}），
+        用于右键菜单判断当前卡片是否已配对 + 拿到 paired_hwnd。
+        """
+        self._paired_pairs_cache = dict(paired_pairs)
+        self._paired_ids_cache = set(paired_pairs.keys())
 
     def set_menu_open(self, is_open: bool) -> None:
         """卡片右键菜单显示/关闭时调用，抑制 leaveEvent 触发的自动收起。
