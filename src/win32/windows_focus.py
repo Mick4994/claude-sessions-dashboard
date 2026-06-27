@@ -23,8 +23,6 @@ if os.name == "nt":
     _FindWindowExW = _user32.FindWindowExW
     _GetWindowThreadProcessId = _user32.GetWindowThreadProcessId
 
-    _WT_CLASS = "CASCADIA_HOSTING_WINDOW_CLASS"
-    _WT_NAMES = ("windowsterminal.exe", "wt.exe")
     _TERMINAL_CLASSES = {"ConsoleWindowClass", "CASCADIA_HOSTING_WINDOW_CLASS"}
 
     def _rect_nonempty(hwnd: int) -> bool:
@@ -59,7 +57,12 @@ if os.name == "nt":
 
     def find_terminal_for_pid(pid: int) -> int | None:
         """Walk the parent chain of a CC process to find its terminal window.
-        Falls back to the largest visible terminal-class window on the system."""
+
+        PID-strict: only returns a hwnd if some ancestor directly owns a visible
+        terminal-class window. Returns None otherwise — caller should fall back to
+        cwd-title matching, which is the only reliable disambiguator for multiple
+        Windows Terminal panes sharing one WindowsTerminal.exe process.
+        """
         if pid <= 0:
             return None
         try:
@@ -68,40 +71,18 @@ if os.name == "nt":
                 parent = p.parent()
                 if parent is None:
                     break
-                parent_name = parent.name().lower()
-                # For WindowsTerminal.exe: find any visible WT window
-                if parent_name in _WT_NAMES:
-                    return _find_any_visible_terminal(class_filter={_WT_CLASS})
+                # 关键：只有 _find_window_for_process(parent.pid) 命中才返回。
+                # 父进程是 WindowsTerminal.exe 时不要 fallback 到"任意 WT 窗口"，
+                # 因为多个 pane 共享一个 WT 进程，pid 区分不了 pane。
                 hwnd = _find_window_for_process(parent.pid)
                 if hwnd:
                     return hwnd
                 p = parent
         except (psutil.NoSuchProcess, psutil.AccessDenied):
             pass
-        # Fallback: largest visible terminal window on the system
-        return _find_any_visible_terminal()
-
-    def _find_any_visible_terminal(class_filter: set[str] | None = None) -> int | None:
-        """Return the largest visible terminal-class window. No psutil — pure FindWindowExW."""
-        if class_filter is None:
-            class_filter = _TERMINAL_CLASSES
-        best, best_area = None, 0
-        hwnd = 0
-        while True:
-            hwnd = _FindWindowExW(0, hwnd, None, None)
-            if not hwnd:
-                break
-            if not _IsWindowVisible(hwnd):
-                continue
-            if _class_name(hwnd) not in class_filter:
-                continue
-            rect = wt.RECT()
-            if not _GetWindowRect(hwnd, ctypes.byref(rect)):
-                continue
-            area = (rect.right - rect.left) * (rect.bottom - rect.top)
-            if area > best_area:
-                best_area, best = area, hwnd
-        return best
+        # 没有"最大可见终端窗口"兜底——那个会盲目指向最大的那个窗口，
+        # 多终端时永远错。返回 None，让调用方走 cwd-title 路径。
+        return None
 
     def find_terminal_for_cwd(cwd: str) -> int | None:
         if not cwd:
