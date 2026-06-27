@@ -173,12 +173,15 @@ def main() -> int:
                 sessions = collector.current_sessions()
                 sess = next((s for s in sessions if s.id == session_id), None)
                 if sess:
-                    # 优先按 session 标题（JSONL 里的项目名）匹配 WT pane 标题。
-                    # WT pane 标题通常是项目名/任务名，进程 cwd 经常是 home dir，匹配不上。
+                    # 优先按 session 标题（JSONL 里的项目名/任务名）匹配 WT pane 标题
                     if sess.title:
                         hwnd = find_terminal_for_title(sess.title)
                         _w(f"  find_terminal_for_title({sess.title!r}) -> hwnd={hwnd}")
-                    # 退化：按进程 cwd basename 匹配（某些 WT 配置下 pane 标题含完整路径）
+                    # 标题对不上时试 subtitle——通常是完整的项目名
+                    if hwnd is None and sess.subtitle:
+                        hwnd = find_terminal_for_title(sess.subtitle)
+                        _w(f"  find_terminal_for_title(subtitle={sess.subtitle!r}) -> hwnd={hwnd}")
+                    # 退化：按进程 cwd basename 匹配
                     if hwnd is None and sess.cwd:
                         hwnd = find_terminal_for_cwd(sess.cwd)
                         _w(f"  find_terminal_for_cwd({sess.cwd!r}) -> hwnd={hwnd}")
