@@ -59,9 +59,9 @@ if os.name == "nt":
         """Walk the parent chain of a CC process to find its terminal window.
 
         PID-strict: only returns a hwnd if some ancestor directly owns a visible
-        terminal-class window. Returns None otherwise — caller should fall back to
-        cwd-title matching, which is the only reliable disambiguator for multiple
-        Windows Terminal panes sharing one WindowsTerminal.exe process.
+        terminal-class window. Skips WindowsTerminal.exe ancestors — multiple WT
+        panes share one WT pid, so pid can't disambiguate them. Caller must use
+        title/cwd matching for WT-hosted CCs.
         """
         if pid <= 0:
             return None
@@ -71,17 +71,19 @@ if os.name == "nt":
                 parent = p.parent()
                 if parent is None:
                     break
-                # 关键：只有 _find_window_for_process(parent.pid) 命中才返回。
-                # 父进程是 WindowsTerminal.exe 时不要 fallback 到"任意 WT 窗口"，
-                # 因为多个 pane 共享一个 WT 进程，pid 区分不了 pane。
+                parent_name = parent.name().lower()
+                # 父进程是 WindowsTerminal.exe 时不要走 pid-strict：
+                # 多个 pane 共享一个 WT 进程，_find_window_for_process(WT_pid)
+                # 只会返回第一个匹配的 CASCADIA 窗口，无法按 pid 区分 pane。
+                # 这种情况让调用方走 title/cwd 兜底。
+                if parent_name in {"windowsterminal.exe", "wt.exe"}:
+                    return None
                 hwnd = _find_window_for_process(parent.pid)
                 if hwnd:
                     return hwnd
                 p = parent
         except (psutil.NoSuchProcess, psutil.AccessDenied):
             pass
-        # 没有"最大可见终端窗口"兜底——那个会盲目指向最大的那个窗口，
-        # 多终端时永远错。返回 None，让调用方走 cwd-title 路径。
         return None
 
     def find_terminal_for_cwd(cwd: str) -> int | None:
@@ -108,6 +110,59 @@ if os.name == "nt":
                 if cls in _TERMINAL_CLASSES or "powershell" in title or "cmd" in title:
                     return hwnd
         return None
+
+    def find_terminal_for_title(needle: str) -> int | None:
+        """Find visible terminal-class window whose title contains needle.
+
+        Used to disambiguate multiple Windows Terminal panes (all sharing one
+        WT pid) by matching the pane title to the CC session title (project name
+        from JSONL metadata). WT pane titles typically include the working dir
+        or running task name.
+        """
+        if not needle:
+            return None
+        needle_lower = needle.strip().lower()
+        if len(needle_lower) < 2:
+            return None
+        hwnd = 0
+        while True:
+            hwnd = _FindWindowExW(0, hwnd, None, None)
+            if not hwnd:
+                break
+            if not _IsWindowVisible(hwnd):
+                continue
+            cls = _class_name(hwnd)
+            if cls not in _TERMINAL_CLASSES:
+                continue
+            n = _GetWindowTextLengthW(hwnd)
+            if n == 0:
+                continue
+            buf = ctypes.create_unicode_buffer(n + 1)
+            _GetWindowTextW(hwnd, buf, n + 1)
+            title_lower = buf.value.lower()
+            if needle_lower in title_lower:
+                return hwnd
+        return None
+
+    def _find_largest_visible_terminal() -> int | None:
+        """Return the largest visible terminal-class window. Last-resort fallback."""
+        best, best_area = None, 0
+        hwnd = 0
+        while True:
+            hwnd = _FindWindowExW(0, hwnd, None, None)
+            if not hwnd:
+                break
+            if not _IsWindowVisible(hwnd):
+                continue
+            if _class_name(hwnd) not in _TERMINAL_CLASSES:
+                continue
+            rect = wt.RECT()
+            if not _GetWindowRect(hwnd, ctypes.byref(rect)):
+                continue
+            area = (rect.right - rect.left) * (rect.bottom - rect.top)
+            if area > best_area:
+                best_area, best = area, hwnd
+        return best
 
     def activate_window(hwnd: int) -> bool:
         """Bring a window to the foreground, even from a background (pythonw) process."""

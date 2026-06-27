@@ -31,9 +31,11 @@ from src.utils.config import Config
 from src.utils.paths import config_path, default_config_text
 from src.utils.single_instance import try_acquire
 from src.win32.windows_focus import (
+    _find_largest_visible_terminal,
     activate_window,
     find_terminal_for_cwd,
     find_terminal_for_pid,
+    find_terminal_for_title,
 )
 
 logger = logging.getLogger(__name__)
@@ -170,10 +172,20 @@ def main() -> int:
             if hwnd is None:
                 sessions = collector.current_sessions()
                 sess = next((s for s in sessions if s.id == session_id), None)
-                if sess and sess.cwd:
-                    _w(f"  fallback cwd={sess.cwd}")
-                    hwnd = find_terminal_for_cwd(sess.cwd)
-                    _w(f"  find_terminal_for_cwd -> hwnd={hwnd}")
+                if sess:
+                    # 优先按 session 标题（JSONL 里的项目名）匹配 WT pane 标题。
+                    # WT pane 标题通常是项目名/任务名，进程 cwd 经常是 home dir，匹配不上。
+                    if sess.title:
+                        hwnd = find_terminal_for_title(sess.title)
+                        _w(f"  find_terminal_for_title({sess.title!r}) -> hwnd={hwnd}")
+                    # 退化：按进程 cwd basename 匹配（某些 WT 配置下 pane 标题含完整路径）
+                    if hwnd is None and sess.cwd:
+                        hwnd = find_terminal_for_cwd(sess.cwd)
+                        _w(f"  find_terminal_for_cwd({sess.cwd!r}) -> hwnd={hwnd}")
+                    # 兜底：最大可见终端窗口——至少激活点什么
+                    if hwnd is None:
+                        hwnd = _find_largest_visible_terminal()
+                        _w(f"  _find_largest_visible_terminal -> hwnd={hwnd}")
             if hwnd:
                 ok = activate_window(hwnd)
                 _w(f"  activate_window({hwnd}) -> {ok}")
