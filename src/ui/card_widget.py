@@ -4,11 +4,12 @@
 from __future__ import annotations
 
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QColor, QFont
+from PySide6.QtGui import QAction, QColor, QFont
 from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
     QLabel,
+    QMenu,
     QProgressBar,
     QVBoxLayout,
 )
@@ -41,6 +42,9 @@ class SessionCard(QFrame):
     """Expanded card widget for one Claude Code session."""
 
     clicked = Signal(str)  # session_id
+    pairRequested = Signal(str, int, str, str)  # session_id, hwnd, title, class_name
+    unpairRequested = Signal(str)  # session_id
+    listTerminalsRequested = Signal(str)  # session_id（请求父组件提供可见终端列表）
 
     def __init__(self, session: Session, *, parent=None) -> None:
         super().__init__(parent)
@@ -112,6 +116,9 @@ class SessionCard(QFrame):
         self.setFixedHeight(78)
         self.setCursor(Qt.PointingHandCursor)
         self._orig_stylesheet = self.styleSheet()
+        self._terminals: list[dict] = []
+        self._is_paired = False
+        self._paired_dot = None  # 在 set_paired() 第一次调用时初始化
 
     def enterEvent(self, ev) -> None:
         self.setStyleSheet(
@@ -142,3 +149,70 @@ class SessionCard(QFrame):
         if ev.button() == Qt.LeftButton:
             self.clicked.emit(self.session.id)
         super().mousePressEvent(ev)
+
+    # ---- pairing state visual indicator ----
+    def set_paired(self, paired: bool, title: str = "") -> None:
+        """设置卡片右上角的"已配对"小圆点 + tooltip。"""
+        if not hasattr(self, "_paired_dot"):
+            self._init_paired_indicator()
+        self._paired_dot.setVisible(paired)
+        if paired:
+            self.setToolTip(f"已配对 → {title}" if title else "已配对")
+        else:
+            self.setToolTip("")
+
+    def _init_paired_indicator(self) -> None:
+        # 小圆点叠在卡片右上角，亮黄表示已手动配对
+        from PySide6.QtWidgets import QLabel
+        self._paired_dot = QLabel("●", self)
+        self._paired_dot.setStyleSheet(
+            "color: #FACC15; font-size: 12px; background: transparent;"
+        )
+        self._paired_dot.setFixedSize(14, 14)
+        self._paired_dot.move(self.width() - 16, 4)
+        self._paired_dot.setVisible(False)
+
+    def resizeEvent(self, ev) -> None:
+        super().resizeEvent(ev)
+        if hasattr(self, "_paired_dot"):
+            self._paired_dot.move(self.width() - 16, 4)
+
+    # ---- right-click context menu ----
+    def contextMenuEvent(self, ev) -> None:
+        menu = QMenu(self)
+        # 请求父组件填充终端列表
+        self.listTerminalsRequested.emit(self.session.id)
+        if self._terminals:
+            header = menu.addAction(f"配对到终端（{len(self._terminals)} 个可见）")
+            header.setEnabled(False)
+            menu.addSeparator()
+            for t in self._terminals:
+                _label = t["title"] or "(无标题)"
+                if len(_label) > 40:
+                    _label = _label[:37] + "..."
+                _act = menu.addAction(
+                    f"{_label}    [{t['class']}, {t['width']}×{t['height']}]"
+                )
+                # 用闭包捕获当前 terminal 的字段
+                _act.triggered.connect(
+                    lambda _checked=False, tw=t: self.pairRequested.emit(
+                        self.session.id, tw["hwnd"], tw["title"], tw["class"]
+                    )
+                )
+        else:
+            _none = menu.addAction("(当前没有可见的终端窗口)")
+            _none.setEnabled(False)
+        menu.addSeparator()
+        # 取消配对
+        if self._is_paired:
+            _unpair = menu.addAction("取消配对")
+            _unpair.triggered.connect(
+                lambda _checked=False: self.unpairRequested.emit(self.session.id)
+            )
+        menu.exec(ev.globalPos())
+
+    def set_terminals(self, terminals: list[dict], is_paired: bool) -> None:
+        """由父组件在 listTerminalsRequested 后回调注入终端列表。"""
+        self._terminals = terminals
+        self._is_paired = is_paired
+        self.set_paired(is_paired)

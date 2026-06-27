@@ -164,6 +164,54 @@ if os.name == "nt":
                 best_area, best = area, hwnd
         return best
 
+    def list_visible_terminals() -> list[dict]:
+        """枚举所有可见 terminal-class 窗口，给右键手动配对菜单用。
+
+        返回 [{hwnd, pid, class, title, width, height}, ...]。
+        按面积从大到小排序。
+        """
+        out: list[dict] = []
+        hwnd = 0
+        while True:
+            hwnd = _FindWindowExW(0, hwnd, None, None)
+            if not hwnd:
+                break
+            if not _IsWindowVisible(hwnd):
+                continue
+            cls = _class_name(hwnd)
+            if cls not in _TERMINAL_CLASSES:
+                continue
+            if not _rect_nonempty(hwnd):
+                continue
+            pid = wt.DWORD()
+            _GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+            rect = wt.RECT()
+            _GetWindowRect(hwnd, ctypes.byref(rect))
+            n = _GetWindowTextLengthW(hwnd)
+            title = ""
+            if n > 0:
+                buf = ctypes.create_unicode_buffer(n + 1)
+                _GetWindowTextW(hwnd, buf, n + 1)
+                title = buf.value
+            out.append(
+                {
+                    "hwnd": int(hwnd),
+                    "pid": int(pid.value),
+                    "class": cls,
+                    "title": title,
+                    "width": rect.right - rect.left,
+                    "height": rect.bottom - rect.top,
+                }
+            )
+        out.sort(key=lambda d: d["width"] * d["height"], reverse=True)
+        return out
+
+    def is_window_valid(hwnd: int) -> bool:
+        """检查 hwnd 是否仍然指向一个真实窗口（防止 WT 重启后 hwnd 被复用）。"""
+        if not hwnd:
+            return False
+        return bool(_IsWindowVisible(hwnd) and _class_name(hwnd) in _TERMINAL_CLASSES)
+
     def activate_window(hwnd: int) -> bool:
         """Bring a window to the foreground, even from a background (pythonw) process."""
         if not hwnd:
@@ -184,4 +232,10 @@ else:
         return None
 
     def activate_window(*_args, **_kwargs):
+        return False
+
+    def list_visible_terminals(*_args, **_kwargs):
+        return []
+
+    def is_window_valid(*_args, **_kwargs):
         return False

@@ -3,7 +3,7 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import QPoint, QPropertyAnimation, Qt, QTimer
+from PySide6.QtCore import QPoint, QPropertyAnimation, Qt, QTimer, Signal
 from PySide6.QtWidgets import (
     QApplication,
     QLabel,
@@ -16,6 +16,7 @@ from ..collector.models import Session, SessionStatus
 from .card_widget import SessionCard
 from .indicator_widget import IndicatorDot
 from .signal_bus import signalBus
+from ..win32 import windows_focus as wf
 
 
 class MainWindow(QMainWindow):
@@ -25,6 +26,11 @@ class MainWindow(QMainWindow):
     CARD_SPACING = 6
     PADDING = 8
     INDICATOR_ROW = 22
+
+    # 卡片请求配对/取消配对/列出终端时，主窗口把它们再转出去给主程序处理
+    cardPairRequested = Signal(str, int, str, str)  # session_id, hwnd, title, class_name
+    cardUnpairRequested = Signal(str)
+    cardListTerminalsRequested = Signal(str)
 
     def __init__(self, *, expand_delay_ms: int = 200, collapse_delay_ms: int = 500) -> None:
         super().__init__()
@@ -80,6 +86,40 @@ class MainWindow(QMainWindow):
         self._rebuild()
         self._fit_height()
 
+    def set_paired_sessions(self, paired_ids: set[str], titles: dict[str, str]) -> None:
+        """根据持久化的配对表，刷新每张卡片右上角的"已配对"小圆点。"""
+        self._paired_ids_cache = set(paired_ids)
+        for i in range(self._inner.count()):
+            _item = self._inner.itemAt(i)
+            _w = _item.widget() if _item else None
+            if isinstance(_w, SessionCard):
+                _sid = _w.session.id
+                _w.set_paired(_sid in paired_ids, titles.get(_sid, ""))
+
+    def _find_card(self, sid: str):
+        """按 session_id 在当前 expanded 卡片里找。"""
+        from .card_widget import SessionCard as _SC
+
+        for i in range(self._inner.count()):
+            _item = self._inner.itemAt(i)
+            _w = _item.widget() if _item else None
+            if isinstance(_w, _SC) and _w.session.id == sid:
+                return _w
+        return None
+
+    def _on_card_list_terminals(self, sid: str) -> None:
+        """卡片右键请求列出终端窗口——自己查 wf.list_visible_terminals 并回填到那张卡片。"""
+        _card = self._find_card(sid)
+        if _card is None:
+            return
+        _terms = wf.list_visible_terminals()
+        _is_paired = sid in (self._paired_ids_cache or set())
+        _card.set_terminals(_terms, _is_paired)
+
+    def set_paired_cache(self, paired_ids: set[str]) -> None:
+        """仅刷新内存缓存（不刷 UI），用于右键菜单判断当前卡片是否已配对。"""
+        self._paired_ids_cache = set(paired_ids)
+
     def _fit_height(self) -> None:
         n = max(1, len(self._sessions))
         if self._expanded:
@@ -132,6 +172,11 @@ class MainWindow(QMainWindow):
             for s in self._sessions:
                 card = SessionCard(s)
                 card.clicked.connect(signalBus.cardClicked.emit)
+                # 把卡片的配对相关信号转发出去
+                card.pairRequested.connect(self.cardPairRequested)
+                card.unpairRequested.connect(self.cardUnpairRequested)
+                # 列出终端的请求由主窗口自己处理（需要回填到具体卡片）
+                card.listTerminalsRequested.connect(self._on_card_list_terminals)
                 self._inner.addWidget(card)
         else:
             for s in self._sessions:

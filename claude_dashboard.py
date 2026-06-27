@@ -20,6 +20,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 from PySide6.QtWidgets import QApplication, QSystemTrayIcon
 
 from src.collector.collector import SessionCollector
+from src.core.pairing_store import PairingStore
 from src.core.session_registry import SessionRegistry
 from src.core.status import SessionStatus
 from src.server.hook_server import HookServer
@@ -28,7 +29,7 @@ from src.ui.main_window import MainWindow
 from src.ui.signal_bus import signalBus
 from src.ui.tray import build_tray
 from src.utils.config import Config
-from src.utils.paths import config_path, default_config_text
+from src.utils.paths import app_data_dir, config_path, default_config_text
 from src.utils.single_instance import try_acquire
 from src.win32.windows_focus import (
     _find_largest_visible_terminal,
@@ -36,6 +37,8 @@ from src.win32.windows_focus import (
     find_terminal_for_cwd,
     find_terminal_for_pid,
     find_terminal_for_title,
+    is_window_valid,
+    list_visible_terminals,
 )
 
 logger = logging.getLogger(__name__)
@@ -82,6 +85,9 @@ def main() -> int:
 
     # -- registry (session_id-keyed, thread-safe) --
     registry = SessionRegistry()
+
+    # -- 手动配对持久化（卡片右键 → 选终端 → 写文件） --
+    pairing_store = PairingStore(app_data_dir() / "pairings.json")
 
     # -- window --
     window = MainWindow(
@@ -132,8 +138,18 @@ def main() -> int:
     def on_sessions_changed(sessions):
         _sync_registry(sessions)
         window.set_sessions(sessions)
+        # 刷新卡片的配对状态指示器
+        _refresh_paired_indicators()
 
     collector.sessionsChanged.connect(on_sessions_changed)
+
+    def _refresh_paired_indicators() -> None:
+        """读持久化配对表 → 更新每张卡片的"已配对"小圆点 + 内存缓存。"""
+        _pairs = pairing_store.all()
+        _ids = set(_pairs.keys())
+        _titles = {sid: p.get("title", "") for sid, p in _pairs.items()}
+        window.set_paired_sessions(_ids, _titles)
+        window.set_paired_cache(_ids)
 
     # -- hook server --
     router = HookRouter(registry)
@@ -165,7 +181,24 @@ def main() -> int:
             _w(f"cardClicked sid={session_id}")
             hwnd: int | None = None
             entry = registry.get_by_sid(session_id)
-            if entry and entry.pid:
+            # 1. 先看手动配对缓存（最高优先级）
+            pair = pairing_store.get(session_id)
+            if pair:
+                _w(f"  pair cache: hwnd={pair['hwnd']} title={pair['title']!r}")
+                if is_window_valid(pair["hwnd"]):
+                    hwnd = pair["hwnd"]
+                    _w(f"  pair cache hwnd still valid -> {hwnd}")
+                else:
+                    # hwnd 失效（WT 重启等），按 title 重新找
+                    for t in list_visible_terminals():
+                        if t["title"] == pair["title"] and t["class"] == pair["class"]:
+                            hwnd = t["hwnd"]
+                            pairing_store.set(session_id, hwnd, t["title"], t["class"])
+                            _w(f"  pair cache hwnd stale, re-resolved by title -> {hwnd}")
+                            break
+                    if hwnd is None:
+                        _w(f"  pair cache stale + title miss")
+            if hwnd is None and entry and entry.pid:
                 _w(f"  entry.pid={entry.pid}")
                 hwnd = find_terminal_for_pid(entry.pid)
                 _w(f"  find_terminal_for_pid({entry.pid}) -> hwnd={hwnd}")
@@ -202,6 +235,20 @@ def main() -> int:
                 _f.write(_tb.format_exc())
 
     signalBus.cardClicked.connect(on_card_clicked)
+
+    # -- 手动配对：卡片右键 → 选终端 / 取消配对 --
+    def _on_card_paired(session_id: str, hwnd: int, title: str, class_name: str) -> None:
+        pairing_store.set(session_id, hwnd, title, class_name)
+        _refresh_paired_indicators()
+        logger.info("paired sid=%s -> hwnd=%d title=%r", session_id, hwnd, title)
+
+    def _on_card_unpaired(session_id: str) -> None:
+        pairing_store.delete(session_id)
+        _refresh_paired_indicators()
+        logger.info("unpaired sid=%s", session_id)
+
+    window.cardPairRequested.connect(_on_card_paired)
+    window.cardUnpairRequested.connect(_on_card_unpaired)
 
     # -- tray --
     _tray = build_tray(app, window, collector, cfg_path)
