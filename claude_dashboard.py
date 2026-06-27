@@ -30,6 +30,11 @@ from src.ui.tray import build_tray
 from src.utils.config import Config
 from src.utils.paths import config_path, default_config_text
 from src.utils.single_instance import try_acquire
+from src.win32.windows_focus import (
+    activate_window,
+    find_terminal_for_cwd,
+    find_terminal_for_pid,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -143,33 +148,43 @@ def main() -> int:
 
     # -- card click → activate CC terminal --
     def on_card_clicked(session_id: str):
-        import os as _os, datetime as _dt
+        # 防御性 try/except：pythonw 启动时没有 stderr，任何异常都会被静默吞掉。
+        # 把所有异常 dump 到 csd_click_debug.log，确保未来类似 bug 不会再次无声丢失。
+        import datetime as _dt
+        import traceback as _tb
 
-        _log = Path(_os.environ.get("TEMP", ".")) / "csd_click_debug.log"
-        with open(_log, "a") as _f:
-            _f.write(f"{_dt.datetime.now():%H:%M:%S.%f} cardClicked sid={session_id}\n")
-        hwnd = None
-        entry = registry.get_by_sid(session_id)
-        if entry and entry.pid:
-            with open(_log, "a") as _f:
-                _f.write(f"{_dt.datetime.now():%H:%M:%S.%f}   entry.pid={entry.pid}\n")
-            hwnd = find_terminal_for_pid(entry.pid)
-            with open(_log, "a") as _f:
-                _f.write(f"{_dt.datetime.now():%H:%M:%S.%f}   find_terminal_for_pid({entry.pid}) → hwnd={hwnd}\n")
-        if hwnd is None:
-            sessions = collector.current_sessions()
-            sess = next((s for s in sessions if s.id == session_id), None)
-            if sess and sess.cwd:
-                with open(_log, "a") as _f:
-                    _f.write(f"{_dt.datetime.now():%H:%M:%S.%f}   fallback cwd={sess.cwd}\n")
-                hwnd = find_terminal_for_cwd(sess.cwd)
-        if hwnd:
-            ok = activate_window(hwnd)
-            with open(_log, "a") as _f:
-                _f.write(f"{_dt.datetime.now():%H:%M:%S.%f}   activate_window({hwnd}) → {ok}\n")
-        else:
-            with open(_log, "a") as _f:
-                _f.write(f"{_dt.datetime.now():%H:%M:%S.%f}   NO hwnd for sid={session_id}\n")
+        _log = Path(os.environ.get("TEMP", ".")) / "csd_click_debug.log"
+
+        def _w(msg: str) -> None:
+            with open(_log, "a", encoding="utf-8") as _f:
+                _f.write(f"{_dt.datetime.now():%H:%M:%S.%f} {msg}\n")
+
+        try:
+            _w(f"cardClicked sid={session_id}")
+            hwnd: int | None = None
+            entry = registry.get_by_sid(session_id)
+            if entry and entry.pid:
+                _w(f"  entry.pid={entry.pid}")
+                hwnd = find_terminal_for_pid(entry.pid)
+                _w(f"  find_terminal_for_pid({entry.pid}) -> hwnd={hwnd}")
+            if hwnd is None:
+                sessions = collector.current_sessions()
+                sess = next((s for s in sessions if s.id == session_id), None)
+                if sess and sess.cwd:
+                    _w(f"  fallback cwd={sess.cwd}")
+                    hwnd = find_terminal_for_cwd(sess.cwd)
+                    _w(f"  find_terminal_for_cwd -> hwnd={hwnd}")
+            if hwnd:
+                ok = activate_window(hwnd)
+                _w(f"  activate_window({hwnd}) -> {ok}")
+            else:
+                _w(f"  NO hwnd for sid={session_id}")
+        except Exception:
+            # 任何异常（NameError / psutil.NoSuchProcess / ctypes.ArgumentError / OSError ...）
+            # 都要落盘，不能再让"异常被吞"成为隐藏 bug 的根源。
+            _w("  EXCEPTION caught:")
+            with open(_log, "a", encoding="utf-8") as _f:
+                _f.write(_tb.format_exc())
 
     signalBus.cardClicked.connect(on_card_clicked)
 
