@@ -121,8 +121,15 @@ class MainWindow(QMainWindow):
         self._paired_ids_cache = set(paired_ids)
 
     def set_menu_open(self, is_open: bool) -> None:
-        """卡片右键菜单显示/关闭时调用，抑制 leaveEvent 触发的自动收起。"""
+        """卡片右键菜单显示/关闭时调用，抑制 leaveEvent 触发的自动收起。
+
+        关键：开菜单时要把已经挂起的 expand / collapse timer 都 stop 掉——
+        否则菜单显示期间旧 timer fire 触发收起，Qt 会 dismiss 掉弹出的菜单。
+        """
         self._menu_open = bool(is_open)
+        if is_open:
+            self._collapse_timer.stop()
+            self._expand_timer.stop()
 
     def collapse_after_menu(self) -> None:
         """菜单关闭后，如果鼠标还在 dashboard 外，启动一次收起计时。"""
