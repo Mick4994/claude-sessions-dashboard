@@ -49,6 +49,22 @@ if os.name == "nt":
 
     _TERMINAL_CLASSES = {"ConsoleWindowClass", "CASCADIA_HOSTING_WINDOW_CLASS"}
 
+    # 通用 / 非 CC 终端标题黑名单 — 菜单里不显示这些 pane
+    _GENERIC_TERMINAL_TITLES = frozenset({
+        "Windows PowerShell",
+        "PowerShell",
+        "pwsh",
+        "Command Prompt",
+        "cmd",
+        "WindowsCommandPrompt",
+        "Terminal",
+        "Windows Terminal",
+    })
+
+    # 最小尺寸阈值 — 小于这个的 pane 基本是空/最小化状态
+    _MIN_TERMINAL_WIDTH = 200
+    _MIN_TERMINAL_HEIGHT = 100
+
     def _rect_nonempty(hwnd: int) -> bool:
         rect = wt.RECT()
         if not _GetWindowRect(hwnd, ctypes.byref(rect)):
@@ -294,22 +310,52 @@ if os.name == "nt":
         """按 session 过滤终端列表，给右键菜单用。
 
         返回 (candidates, fallback_to_all)：
-        - candidates: 列表，配对的在最前（若仍 valid），其余按 title 匹配 + 面积排序
-        - fallback_to_all: True 表示 session 没有任何匹配项、菜单要显示全部终端
+        - candidates: 首先过滤通用/空/极小 pane，再按 title 匹配；配对项置顶。
+        - fallback_to_all: True = 上退化了（无匹配 → 候选集 → all），菜单提示。
 
         匹配规则（不区分大小写子串）：
         - title 含 session_title 或 session_subtitle
 
+        通用 pane 过滤（is_generic_terminal）：
+        - 标题在黑名单里（Windows PowerShell / cmd 等默认标题）
+        - 尺寸 < 200×100（空 pane / 已最小化）
+        - 配对项特殊保护：即使被过滤，如果当前 session 已配对到它，强制保留
+
         排序：
-        1. paired_hwnd 有效且在候选里 → 最前
+        1. paired_hwnd 有效且在候选里 → 最前打勾
         2. 标题匹配的按面积降序
         3. 其它按面积降序
         """
         all_terms = list_visible_terminals()
         _wf_log(
             "lts",
-            f"enter title={session_title!r} subtitle={session_subtitle!r} paired_hwnd={paired_hwnd} all_count={len(all_terms)}",
+            f"enter title={session_title!r} subtitle={session_subtitle!r} "
+            f"paired_hwnd={paired_hwnd} all_visible={len(all_terms)}",
         )
+
+        # === 候选集构造（过滤通用 + 过小） ===
+        candidates = [t for t in all_terms if not _is_generic_terminal(t)]
+        _wf_log("lts", f"candidates after generic filter: {len(candidates)} (removed {len(all_terms) - len(candidates)})")
+
+        # 配对项强制保留（即使被通用过滤剔除了也要留着）
+        forced_paired: dict | None = None
+        if paired_hwnd and is_window_valid(paired_hwnd):
+            for t in all_terms:
+                if t["hwnd"] == paired_hwnd:
+                    if t in candidates:
+                        forced_paired = t
+                    else:
+                        # 配对项被过滤了，强制加回候选集
+                        _wf_log("lts", f"paired hwnd={paired_hwnd} was filtered as generic, force-re-adding")
+                        candidates.append(t)
+                        forced_paired = t
+                    break
+            if forced_paired is None:
+                _wf_log("lts", f"paired_hwnd={paired_hwnd} is_window_valid but not in all_terms — stale?")
+        elif paired_hwnd:
+            _wf_log("lts", f"paired_hwnd={paired_hwnd} is NOT valid anymore")
+
+        # === title/subtitle 匹配 ===
         needles: list[str] = []
         if session_title:
             needles.append(session_title.strip().lower())
@@ -320,7 +366,9 @@ if os.name == "nt":
 
         matched: list[dict] = []
         others: list[dict] = []
-        for t in all_terms:
+        for t in candidates:
+            if forced_paired and t["hwnd"] == forced_paired["hwnd"]:
+                continue  # 配对项单独放
             tl = t["title"].lower()
             if any(n in tl for n in needles):
                 matched.append(t)
@@ -328,35 +376,48 @@ if os.name == "nt":
                 others.append(t)
         _wf_log("lts", f"matched={len(matched)} others={len(others)}")
 
-        # 配对项插到最前（若 valid）
-        paired_item: dict | None = None
-        if paired_hwnd and is_window_valid(paired_hwnd):
-            for t in all_terms:
-                if t["hwnd"] == paired_hwnd:
-                    paired_item = t
-                    break
-        if paired_item is not None:
-            # 从 matched/others 移除再加到最前
-            matched = [t for t in matched if t["hwnd"] != paired_hwnd]
-            others = [t for t in others if t["hwnd"] != paired_hwnd]
-            result = [paired_item] + matched + others
+        # === 组装结果 ===
+        if forced_paired:
+            tail = matched + others
+            tail.sort(key=lambda d: d["width"] * d["height"], reverse=True)
+            result = [forced_paired] + tail
         else:
+            matched.sort(key=lambda d: d["width"] * d["height"], reverse=True)
             result = matched + others
 
-        # 排序：除配对外按面积降序
-        if paired_item is not None:
-            tail = result[1:]
-            tail.sort(key=lambda d: d["width"] * d["height"], reverse=True)
-            result = [paired_item] + tail
-        else:
-            result.sort(key=lambda d: d["width"] * d["height"], reverse=True)
+        # === 兜底逻辑 ===
+        # matched 非空：直接用（精确导航）
+        # matched 空 + candidates 非空：退回候选集（已过滤通用），标 fallback
+        # candidates 空（极端）：退回 all_terms，含通用
+        fallback = not matched and forced_paired is None
+        if fallback and candidates:
+            # 候选集已无匹配 → 全部退回候选集（但通用 pane 已过滤）
+            result = sorted(candidates, key=lambda d: d["width"] * d["height"], reverse=True)
+        elif fallback:
+            # 候选集空 → 极端兜底
+            result = sorted(all_terms, key=lambda d: d["width"] * d["height"], reverse=True)
 
-        fallback = len(matched) == 0 and paired_item is None
         _wf_log(
             "lts",
-            f"exit -> {len(result)} item(s) paired_first={paired_item is not None} fallback_to_all={fallback}",
+            f"exit -> {len(result)} item(s) forced_paired={forced_paired is not None} "
+            f"fallback={fallback}",
         )
         return result, fallback
+
+
+    def _is_generic_terminal(t: dict) -> bool:
+        """判断 terminal 是否为通用 / 空 pane（不可能跑 CC）。"""
+        _title = (t.get("title") or "").strip()
+        # 黑名单标题
+        if _title.lower() in {x.lower() for x in _GENERIC_TERMINAL_TITLES}:
+            return True
+        # 无标题
+        if not _title:
+            return True
+        # 尺寸过小（空 pane / 最小化了）
+        if t.get("width", 0) < _MIN_TERMINAL_WIDTH or t.get("height", 0) < _MIN_TERMINAL_HEIGHT:
+            return True
+        return False
 
     def activate_window(hwnd: int) -> bool:
         """Bring a window to the foreground, even from a background (pythonw) process."""
