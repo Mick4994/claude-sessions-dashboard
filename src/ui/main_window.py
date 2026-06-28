@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import os
+import time
 from pathlib import Path
 
 from PySide6.QtCore import QPoint, QPropertyAnimation, Qt, QTimer, Signal
@@ -258,32 +259,39 @@ class MainWindow(QMainWindow):
     def _animate_width(self, _from: int, to: int, duration_ms: int) -> None:
         rect = self.geometry()
         dx = to - self._current_width
-        end_rect = rect.adjusted(0, 0, dx, 0)
-        if dx != 0:
-            end_rect.setX(rect.x() - dx)
+        # 右对齐 — tween width 时 x 也同步滑动
+        start_x = rect.x() - dx if dx != 0 else rect.x()
         self._current_width = to
-        anim = QPropertyAnimation(self, b"geometry")
-        anim.setDuration(duration_ms)
-        anim.setStartValue(rect)
-        anim.setEndValue(end_rect)
-        # 帧级日志：每帧 geometry + timestamp → log，验证动画质量
+        self._anim_t0 = time.perf_counter()
+        self._anim_dur = duration_ms / 1000.0
+        self._anim_start_g = rect
+        self._anim_end_x = start_x
+        self._anim_end_w = to
+        # ponytail: QPropertyAnimation 在部分 Qt platform 下不产生 ticks（offscreen/
+        # bash-QPA），用 QTimer 手动 tween — 每 16ms (~60fps) 一帧保证所有环境有帧
+        timer = QTimer(self)
+        timer.setInterval(16)
+        timer.timeout.connect(lambda: self._anim_tick(timer, duration_ms))
+        timer.start()
+
+    def _anim_tick(self, timer: QTimer, duration_ms: int) -> None:
+        t = (time.perf_counter() - self._anim_t0) / self._anim_dur
+        t = min(1.0, max(0.0, t))
+        # OutCubic easing: 1 - (1-t)³
+        eased = 1.0 - (1.0 - t) ** 3
+        cur_w = self._anim_start_g.width() + int((self._anim_end_w - self._anim_start_g.width()) * eased)
+        cur_x = self._anim_start_g.x() - int((self._anim_end_w - self._anim_start_g.width()) * eased)
+        self.setGeometry(cur_x, self._anim_start_g.y(), cur_w, self._anim_start_g.height())
+        # 帧级日志 — 设 CSD_DEBUG=1 后写 %TEMP%/csd_anim_debug.log
         if os.environ.get("CSD_DEBUG"):
-            import datetime as _dt  # noqa: F811
+            import datetime as _dt
             _log_path = Path(os.environ.get("TEMP", ".")) / "csd_anim_debug.log"
             with open(_log_path, "a", encoding="utf-8") as _f:
-                _f.write(f"{_dt.datetime.now():%H:%M:%S.%f} [anim:start] w={rect.width()}→{to} dur={duration_ms}\n")
-            anim.valueChanged.connect(
-                lambda v: open(_log_path, "a", encoding="utf-8").write(
-                    f"{_dt.datetime.now():%H:%M:%S.%f} [anim:frame] g={v}\n"
-                )
-            )
-            anim.finished.connect(
-                lambda: open(_log_path, "a", encoding="utf-8").write(
-                    f"{_dt.datetime.now():%H:%M:%S.%f} [anim:stop]\n"
-                )
-            )
-        anim.start()
-        QTimer.singleShot(duration_ms + 50, self._fit_height)
+                _f.write(f"{_dt.datetime.now():%H:%M:%S.%f} [anim:frame] t={t:.3f} eased={eased:.3f} g={cur_x},{self._anim_start_g.y()},{cur_w},{self._anim_start_g.height()}\n")
+        if t >= 1.0:
+            timer.stop()
+            timer.deleteLater()
+            QTimer.singleShot(50, self._fit_height)
 
     # ---- drag + edge snap ----
     def mousePressEvent(self, ev) -> None:

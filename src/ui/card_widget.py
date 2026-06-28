@@ -184,7 +184,7 @@ class SessionCard(QFrame):
     # ---- pairing state visual indicator ----
     def set_paired(self, paired: bool, title: str = "") -> None:
         """设置卡片右上角的"已配对"小圆点 + tooltip。"""
-        if not hasattr(self, "_paired_dot"):
+        if getattr(self, "_paired_dot", None) is None:
             self._init_paired_indicator()
         self._paired_dot.setVisible(paired)
         if paired:
@@ -205,7 +205,7 @@ class SessionCard(QFrame):
 
     def resizeEvent(self, ev) -> None:
         super().resizeEvent(ev)
-        if hasattr(self, "_paired_dot"):
+        if getattr(self, "_paired_dot", None) is not None:
             self._paired_dot.move(self.width() - 16, 4)
 
     # ---- right-click context menu ----
