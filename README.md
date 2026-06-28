@@ -168,6 +168,17 @@ uv run python claude_dashboard.py       # run with console output
 - PySide6 6.7+
 - psutil 7.2+
 
+## Version History
+
+| Tag | Commit | Note |
+|-----|--------|------|
+| v0.3.1 | `306f3d2` | Filter generic/empty panes from right-click menu (no more "Windows PowerShell" entry) |
+| v0.3.0 | `a8f9f47` | Manual right-click terminal pairing + persistent cache (first version that disambiguates multiple panes correctly) |
+| v0.2.0 | `231ab1c` | PID path runs end-to-end (activates a window, may be the wrong one) |
+| v0.1.0 | `d394b1b` | First click-to-activate-terminal feature introduced (PID-based, unstable) |
+
+The diagnostic scripts under `scripts/diag_*.py` written during the WT pane↔process mapping research are preserved on branch `archive/diag-scripts-2026-06-28`.
+
 ## Repo
 
 https://github.com/Mick4994/claude-sessions-dashboard
@@ -331,6 +342,17 @@ uv run python claude_dashboard.py       # 带控制台输出运行
 - Python 3.12+（uv 管理虚拟环境）
 - PySide6 6.7+
 - psutil 7.2+
+
+## 版本历史
+
+| Tag | Commit | 说明 |
+|-----|--------|------|
+| v0.3.1 | `306f3d2` | 过滤通用/空 pane，右键菜单不再多"Windows PowerShell" |
+| v0.3.0 | `a8f9f47` | 卡片右键手动配对终端 + 持久化缓存（首个能正确区分多 pane 的版本） |
+| v0.2.0 | `231ab1c` | PID 路径能跑通（激活窗口但不一定对） |
+| v0.1.0 | `d394b1b` | 首个点击唤起终端功能引入（基于 PID） |
+
+WT pane↔process 映射研究的诊断脚本（`scripts/diag_*.py`）归档在分支 `archive/diag-scripts-2026-06-28` 保留。
 
 ## 仓库
 
