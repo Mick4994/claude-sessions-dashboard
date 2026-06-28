@@ -168,13 +168,17 @@ def test_post_unknown_event_returns_200_ignored(live_server):
     assert reg.get(pid=4242).status == SessionStatus.IDLE
 
 
-# TC-016: unknown sid → 200 with note, no crash
-def test_post_unknown_sid_returns_200_with_warn(live_server):
+# TC-016: unknown sid → 200 OK; status queued in registry._pending for later apply.
+# (Old behavior was 200 + {"note": "unknown sid"} — that was the silent-drop bug.)
+def test_post_unknown_sid_returns_200_and_queues(live_server):
     _, port, reg = live_server
     code, body = _post(port, "/hook/Stop?sid=does-not-exist")
     assert code == 200
-    assert body.get("note") == "unknown sid"
-    assert reg.get(pid=4242).status == SessionStatus.IDLE
+    assert body.get("ok") is True
+    assert reg._pending.get("does-not-exist") == SessionStatus.IDLE
+    reg.register_by_sid("does-not-exist", cwd=Path("C:/later"))
+    assert reg.get_by_sid("does-not-exist").status == SessionStatus.IDLE
+    assert "does-not-exist" not in reg._pending
 
 
 # TC-017: missing sid → 200 with note, no crash

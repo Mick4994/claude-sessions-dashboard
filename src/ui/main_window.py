@@ -3,7 +3,7 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import QPoint, QPropertyAnimation, Qt, QTimer, Signal
+from PySide6.QtCore import QPoint, QPropertyAnimation, QEasingCurve, QRect, Qt, QTimer, Signal
 from PySide6.QtWidgets import (
     QApplication,
     QLabel,
@@ -195,10 +195,12 @@ class MainWindow(QMainWindow):
                 label.setWordWrap(True)
                 self._inner.addWidget(label, 0, Qt.AlignCenter)
             else:
-                # Breathing dot — not clickable (no session_id).
-                dot = IndicatorDot(SessionStatus.IDLE, size_px=10)
-                dot.setToolTip("暂无活跃 Claude Code 会话")
-                self._inner.addWidget(dot, 0, Qt.AlignCenter)
+                # ponytail: 空心环 + 声呐脉冲 — 几何上区别于实心 IDLE 点
+                from .empty_indicator import EmptyStateIndicator
+
+                placeholder = EmptyStateIndicator(size_px=12)
+                placeholder.setToolTip("暂无活跃 Claude Code 会话")
+                self._inner.addWidget(placeholder, 0, Qt.AlignCenter)
             self._inner.addStretch(0)
             return
 
@@ -238,28 +240,36 @@ class MainWindow(QMainWindow):
             return
         self._expanded = True
         self._rebuild()
-        self._animate_width(self.COLLAPSED_WIDTH, self.EXPANDED_WIDTH, 180)
+        self._animate_to(self.EXPANDED_WIDTH, self._target_height_expanded(), 220)
 
     def _do_collapse(self) -> None:
         if not self._expanded:
             return
         self._expanded = False
         self._rebuild()
-        self._animate_width(self.EXPANDED_WIDTH, self.COLLAPSED_WIDTH, 180)
+        self._animate_to(self.COLLAPSED_WIDTH, self._target_height_collapsed(), 220)
 
-    def _animate_width(self, _from: int, to: int, duration_ms: int) -> None:
+    def _target_height_expanded(self) -> int:
+        n = len(self._sessions)
+        return self.PADDING * 2 + n * self.CARD_HEIGHT + max(0, n - 1) * self.CARD_SPACING
+
+    def _target_height_collapsed(self) -> int:
+        n = max(1, len(self._sessions))
+        h = self.PADDING * 2 + n * self.INDICATOR_ROW + (n - 1) * 4
+        return max(60, h)
+
+    def _animate_to(self, target_w: int, target_h: int, duration_ms: int) -> None:
         rect = self.geometry()
-        dx = to - self._current_width
-        end_rect = rect.adjusted(0, 0, dx, 0)
-        if dx != 0:
-            end_rect.setX(rect.x() - dx)
-        self._current_width = to
+        dx = target_w - self._current_width
+        end_rect = QRect(rect.x() - dx, rect.y(), target_w, target_h)
+        self._current_width = target_w
         anim = QPropertyAnimation(self, b"geometry")
         anim.setDuration(duration_ms)
         anim.setStartValue(rect)
         anim.setEndValue(end_rect)
+        anim.setEasingCurve(QEasingCurve.OutCubic)
         anim.start()
-        QTimer.singleShot(duration_ms + 50, self._fit_height)
+        # ponytail: 两轴一起 tween — 不再需要 _fit_height snap
 
     # ---- drag + edge snap ----
     def mousePressEvent(self, ev) -> None:

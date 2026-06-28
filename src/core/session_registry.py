@@ -40,6 +40,7 @@ class SessionRegistry:
         self._lock = threading.Lock()
         self._by_pid: dict[int, SessionEntry] = {}
         self._by_sid: dict[str, SessionEntry] = {}
+        self._pending: dict[str, SessionStatus] = {}      # hook 早于 register 时排队
         self._callbacks = _Callbacks()
 
     # -- callbacks -------------------------------------------------------
@@ -99,8 +100,16 @@ class SessionRegistry:
         self, session_id: str, cwd: Path, *, pid: int = 0, jsonl_path: Path | None = None
     ) -> SessionEntry:
         entry = SessionEntry(pid=pid, cwd=cwd, session_id=session_id, jsonl_path=jsonl_path)
+        pending: SessionStatus | None = None
         with self._lock:
             self._by_sid[session_id] = entry
+            pending = self._pending.pop(session_id, None)
+        if pending is not None:
+            old = entry.status
+            entry.status = pending
+            if old is not pending:
+                for cb in self._callbacks.status_changed:
+                    cb(entry, pending)
         for cb in self._callbacks.added:
             cb(entry)
         return entry
@@ -114,11 +123,13 @@ class SessionRegistry:
         return entry
 
     def set_status_by_sid(self, session_id: str, status: SessionStatus) -> None:
-        entry = self.get_by_sid(session_id)
-        if entry is None:
-            return
-        old = entry.status
-        entry.status = status
+        with self._lock:
+            entry = self._by_sid.get(session_id)
+            if entry is None:
+                self._pending[session_id] = status
+                return
+            old = entry.status
+            entry.status = status
         if old is not status:
             for cb in self._callbacks.status_changed:
                 cb(entry, status)

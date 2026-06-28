@@ -198,6 +198,63 @@ def test_unregister_removes_from_sid_index():
     assert reg.get_by_sid("sess-Z") is None
 
 
+# TC-PENDING: hook fires before collector registers → must queue, not drop.
+# Regression for the silent-drop bug that left UserPromptSubmit stuck gray.
+
+
+def test_set_status_before_register_queues_pending():
+    reg = SessionRegistry()
+    reg.set_status_by_sid("sid-X", SessionStatus.WORKING)
+    reg.register_by_sid("sid-X", cwd=Path("."))
+    entry = reg.get_by_sid("sid-X")
+    assert entry.status == SessionStatus.WORKING
+
+
+def test_pending_overwritten_by_later_hook():
+    reg = SessionRegistry()
+    reg.set_status_by_sid("sid-Y", SessionStatus.WORKING)
+    reg.set_status_by_sid("sid-Y", SessionStatus.PERMISSION)
+    reg.register_by_sid("sid-Y", cwd=Path("."))
+    entry = reg.get_by_sid("sid-Y")
+    assert entry.status == SessionStatus.PERMISSION
+
+
+def test_pending_drained_after_register():
+    """register 后再 set 不应再写到 pending。"""
+    reg = SessionRegistry()
+    reg.register_by_sid("sid-Z", cwd=Path("."))
+    reg.set_status_by_sid("sid-Z", SessionStatus.WORKING)
+    assert "sid-Z" not in reg._pending
+
+
+def test_register_fires_status_changed_callback_for_pending():
+    """pending 被应用时应触发 on_status_changed（驱动 UI 刷新）。"""
+    reg = SessionRegistry()
+    fired: list[tuple[str, SessionStatus]] = []
+    reg.on_status_changed(lambda e, s: fired.append((e.session_id, s)))
+    reg.set_status_by_sid("sid-W", SessionStatus.WORKING)
+    reg.register_by_sid("sid-W", cwd=Path("."))
+    assert fired == [("sid-W", SessionStatus.WORKING)]
+
+
+def test_set_status_after_register_skips_callback_if_unchanged():
+    """status 没变时不重复触发 callback — 现有行为，不能因为 pending 队列而回归。
+    D:\ 3-状态模型下 SessionEntry 默认 IDLE；设为 IDLE 不应触发 callback。"""
+    reg = SessionRegistry()
+    reg.register_by_sid("sid-V", cwd=Path("."))
+    fired: list[SessionStatus] = []
+    reg.on_status_changed(lambda e, s: fired.append(s))
+    reg.set_status_by_sid("sid-V", SessionStatus.IDLE)
+    assert fired == []
+
+
+def test_unregister_does_not_clear_pending():
+    """未注册的 hook 不能被 unregister 清掉（注册表语义里 pending 是 hook 队列）。"""
+    reg = SessionRegistry()
+    reg.set_status_by_sid("sid-orphan", SessionStatus.PERMISSION)
+    assert reg._pending.get("sid-orphan") == SessionStatus.PERMISSION
+
+
 def test_iter_all_sees_sid_only_entries():
     """Regression: dashboard registers via register_by_sid (no register(pid)),
     so _by_pid is empty. iter_all must still see the entries — otherwise

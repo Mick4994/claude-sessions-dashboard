@@ -60,12 +60,19 @@ def test_router_missing_sid_returns_false():
     assert reg.get(pid=1).status == SessionStatus.IDLE
 
 
-def test_router_unknown_sid_returns_false():
+def test_router_unknown_sid_queues_for_later_apply():
+    """Unknown sid → router 排队到 registry._pending，register 时应用。
+    取代旧的 'returns False' 语义：pending 队列修复后 hook 不再静默丢弃。"""
     reg = SessionRegistry()
-    _registered(reg)
+    _registered(reg)  # 注册 sid='sess-1'
     router = HookRouter(reg)
-    assert router.route("Stop", "nonexistent") is False
-    assert reg.get(pid=1).status == SessionStatus.IDLE
+    queued = router.route("Stop", "ghost-sid")
+    assert queued is True, "queue 视为成功（不再是静默丢弃）"
+    assert reg._pending.get("ghost-sid") == SessionStatus.IDLE
+    reg.register_by_sid("ghost-sid", cwd=Path("C:/elsewhere"))
+    assert reg.get_by_sid("ghost-sid").status == SessionStatus.IDLE
+    assert "ghost-sid" not in reg._pending
+    assert reg.get_by_sid("sess-1").status == SessionStatus.IDLE
 
 
 def test_router_permission_red_to_yellow_on_post_tool_use():
