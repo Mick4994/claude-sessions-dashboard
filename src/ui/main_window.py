@@ -3,6 +3,9 @@
 
 from __future__ import annotations
 
+import os
+from pathlib import Path
+
 from PySide6.QtCore import QPoint, QPropertyAnimation, Qt, QTimer, Signal
 from PySide6.QtWidgets import (
     QApplication,
@@ -263,6 +266,22 @@ class MainWindow(QMainWindow):
         anim.setDuration(duration_ms)
         anim.setStartValue(rect)
         anim.setEndValue(end_rect)
+        # 帧级日志：每帧 geometry + timestamp → log，验证动画质量
+        if os.environ.get("CSD_DEBUG"):
+            import datetime as _dt  # noqa: F811
+            _log_path = Path(os.environ.get("TEMP", ".")) / "csd_anim_debug.log"
+            with open(_log_path, "a", encoding="utf-8") as _f:
+                _f.write(f"{_dt.datetime.now():%H:%M:%S.%f} [anim:start] w={rect.width()}→{to} dur={duration_ms}\n")
+            anim.valueChanged.connect(
+                lambda v: open(_log_path, "a", encoding="utf-8").write(
+                    f"{_dt.datetime.now():%H:%M:%S.%f} [anim:frame] g={v}\n"
+                )
+            )
+            anim.finished.connect(
+                lambda: open(_log_path, "a", encoding="utf-8").write(
+                    f"{_dt.datetime.now():%H:%M:%S.%f} [anim:stop]\n"
+                )
+            )
         anim.start()
         QTimer.singleShot(duration_ms + 50, self._fit_height)
 
