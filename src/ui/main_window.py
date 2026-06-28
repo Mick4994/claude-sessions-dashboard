@@ -268,8 +268,9 @@ class MainWindow(QMainWindow):
         anim.setStartValue(rect)
         anim.setEndValue(end_rect)
         anim.setEasingCurve(QEasingCurve.OutCubic)
-        anim.start()
-        # ponytail: 两轴一起 tween — 不再需要 _fit_height snap
+        # ponytail: DeleteWhenStopped 让 Qt 在动画结束时自我回收 — 否则 anim
+        # 无 parent 引用、函数返回后被 Python GC，动画瞬时跳到 end 而非平滑播放
+        anim.start(QPropertyAnimation.DeleteWhenStopped)
 
     # ---- drag + edge snap ----
     def mousePressEvent(self, ev) -> None:
