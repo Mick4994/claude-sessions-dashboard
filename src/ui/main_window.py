@@ -8,6 +8,7 @@ from PySide6.QtWidgets import (
     QApplication,
     QLabel,
     QMainWindow,
+    QSizePolicy,
     QVBoxLayout,
     QWidget,
 )
@@ -240,32 +241,44 @@ class MainWindow(QMainWindow):
             return
         self._expanded = True
         self._rebuild()
-        # ponytail: 只 tween width — _rebuild 改 layout 后 QMainWindow 会自动调整
-        # height（central widget 的 sizeHint 驱动），同时 tween 两轴会被 layout 抢，
-        # 视觉上"卡"。width 平滑 → 50ms 后 _fit_height snap 到目标高度（< 50ms 肉眼无感）
-        self._animate_width(self.COLLAPSED_WIDTH, self.EXPANDED_WIDTH, 180)
+        self._animate_to(self.EXPANDED_WIDTH, self._target_height_expanded(), 220)
 
     def _do_collapse(self) -> None:
         if not self._expanded:
             return
         self._expanded = False
         self._rebuild()
-        self._animate_width(self.EXPANDED_WIDTH, self.COLLAPSED_WIDTH, 180)
+        self._animate_to(self.COLLAPSED_WIDTH, self._target_height_collapsed(), 220)
 
-    def _animate_width(self, _from: int, to: int, duration_ms: int) -> None:
+    def _target_height_expanded(self) -> int:
+        n = len(self._sessions)
+        return self.PADDING * 2 + n * self.CARD_HEIGHT + max(0, n - 1) * self.CARD_SPACING
+
+    def _target_height_collapsed(self) -> int:
+        n = max(1, len(self._sessions))
+        h = self.PADDING * 2 + n * self.INDICATOR_ROW + (n - 1) * 4
+        return max(60, h)
+
+    def _animate_to(self, target_w: int, target_h: int, duration_ms: int) -> None:
         rect = self.geometry()
-        dx = to - self._current_width
-        end_rect = rect.adjusted(0, 0, dx, 0)
-        if dx != 0:
-            end_rect.setX(rect.x() - dx)
-        self._current_width = to
+        dx = target_w - self._current_width
+        end_rect = QRect(rect.x() - dx, rect.y(), target_w, target_h)
+        self._current_width = target_w
+        # ponytail: 临时把 _container 的 sizePolicy 锁 Fixed — 否则它的 sizeHint
+        # 驱动 main window 自动 resize geometry，跟 animation 抢、视觉上"卡"
+        self._container.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
         anim = QPropertyAnimation(self, b"geometry")
         anim.setDuration(duration_ms)
         anim.setStartValue(rect)
         anim.setEndValue(end_rect)
         anim.setEasingCurve(QEasingCurve.OutCubic)
         anim.start(QPropertyAnimation.DeleteWhenStopped)
-        QTimer.singleShot(duration_ms + 50, self._fit_height)
+        anim.finished.connect(self._animate_to_finished)
+
+    def _animate_to_finished(self) -> None:
+        # 动画结束：恢复 sizePolicy 让 layout 接管，下次 _fit_height 自然生效
+        self._container.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Preferred)
+        self._fit_height()
 
     # ---- drag + edge snap ----
     def mousePressEvent(self, ev) -> None:
