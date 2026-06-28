@@ -3,11 +3,9 @@
 
 from __future__ import annotations
 
-import os
 import time
-from pathlib import Path
 
-from PySide6.QtCore import QPoint, QPropertyAnimation, Qt, QTimer, Signal
+from PySide6.QtCore import QPoint, Qt, QTimer, Signal
 from PySide6.QtWidgets import (
     QApplication,
     QLabel,
@@ -282,12 +280,6 @@ class MainWindow(QMainWindow):
         cur_w = self._anim_start_g.width() + int((self._anim_end_w - self._anim_start_g.width()) * eased)
         cur_x = self._anim_start_g.x() - int((self._anim_end_w - self._anim_start_g.width()) * eased)
         self.setGeometry(cur_x, self._anim_start_g.y(), cur_w, self._anim_start_g.height())
-        # 帧级日志 — 设 CSD_DEBUG=1 后写 %TEMP%/csd_anim_debug.log
-        if os.environ.get("CSD_DEBUG"):
-            import datetime as _dt
-            _log_path = Path(os.environ.get("TEMP", ".")) / "csd_anim_debug.log"
-            with open(_log_path, "a", encoding="utf-8") as _f:
-                _f.write(f"{_dt.datetime.now():%H:%M:%S.%f} [anim:frame] t={t:.3f} eased={eased:.3f} g={cur_x},{self._anim_start_g.y()},{cur_w},{self._anim_start_g.height()}\n")
         if t >= 1.0:
             timer.stop()
             timer.deleteLater()
