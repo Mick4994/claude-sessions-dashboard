@@ -84,6 +84,12 @@ class MainWindow(QMainWindow):
         if len(sessions) > 20:
             sessions = sessions[:20]
         self._sessions = sessions
+        # 菜单打开时（menu.exec() 嵌套事件循环中）不重建卡片，
+        # 否则旧卡片被 deleteLater() 会重置 _paired_hwnd / _terminals，
+        # 导致勾选状态丢失。延后到菜单关闭时再应用。
+        if getattr(self, "_menu_open", False):
+            self._pending_sessions = sessions
+            return
         self._rebuild()
         self._fit_height()
 
@@ -145,6 +151,13 @@ class MainWindow(QMainWindow):
         if is_open:
             self._collapse_timer.stop()
             self._expand_timer.stop()
+        else:
+            # 菜单关闭，应用在菜单显示期间被延后的 session 更新
+            if hasattr(self, "_pending_sessions"):
+                sessions = self._pending_sessions
+                del self._pending_sessions
+                self._rebuild()
+                self._fit_height()
 
     def collapse_after_menu(self) -> None:
         """菜单关闭后，如果鼠标还在 dashboard 外，启动一次收起计时。"""

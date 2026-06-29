@@ -249,12 +249,17 @@ class SessionCard(QFrame):
                 )
                 _act.setCheckable(True)
                 _act.setChecked(_is_paired_here)
-                # 用闭包捕获当前 terminal 的字段
-                _act.triggered.connect(
-                    lambda _checked=False, tw=t: self.pairRequested.emit(
-                        self.session.id, tw["hwnd"], tw["title"], tw["class"]
+                # 点击已勾选项：不重复配对，只关闭菜单（Qt 会自动 toggle checked，
+                # 但 paired_hwnd 未变，下次打开菜单时勾选会恢复）
+                # 点击未勾选项：触发配对
+                if _is_paired_here:
+                    _act.triggered.connect(lambda _checked=False: None)
+                else:
+                    _act.triggered.connect(
+                        lambda _checked=False, tw=t: self.pairRequested.emit(
+                            self.session.id, tw["hwnd"], tw["title"], tw["class"]
+                        )
                     )
-                )
                 _cw_log(
                     "cm",
                     f"  add item hwnd={t['hwnd']} pid={t['pid']} cls={t['class']} "
