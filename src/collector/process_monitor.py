@@ -6,6 +6,10 @@ from pathlib import Path
 # claude-mem worker runs inside .claude-mem/ — never a real user session.
 _CLAUDE_MEM_DIR = ".claude-mem"
 
+# cc-connect bridge processes are long-lived relays, not real user sessions.
+# Their cmdline always contains "--append-system-prompt" with "cc-connect".
+_CC_CONNECT_MARKER = "cc-connect"
+
 
 def _is_cc_process(name: str, cmdline: list[str] | None, cwd: str | None) -> bool:
     """Return True for real Claude Code processes.
@@ -22,6 +26,13 @@ def _is_cc_process(name: str, cmdline: list[str] | None, cwd: str | None) -> boo
     # claude-mem worker runs inside .claude-mem/ — never a real user session.
     if cwd and _CLAUDE_MEM_DIR in cwd:
         return False
+
+    # cc-connect bridge: long-lived relay process, not a real user session.
+    # Detect by scanning the joined cmdline for the "cc-connect" marker.
+    if cmdline:
+        cmdline_joined = " ".join(str(a) for a in cmdline)
+        if _CC_CONNECT_MARKER in cmdline_joined:
+            return False
 
     return True
 
