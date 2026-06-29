@@ -75,7 +75,7 @@ class MainWindow(QMainWindow):
         if screen is None:
             return
         geo = screen.availableGeometry()
-        x = geo.right() - self._current_width
+        x = geo.right() - self.width()
         y = geo.center().y() - self.height() // 2
         self.move(x, y)
 
@@ -170,7 +170,7 @@ class MainWindow(QMainWindow):
         else:
             h = self.PADDING * 2 + n * self.INDICATOR_ROW + (n - 1) * 4
         h = max(60, h)
-        self.resize(self._current_width, h)
+        self.resize(self.width(), h)
         self._move_to_right_edge()
 
     # ---- rebuild contents ----
@@ -283,6 +283,8 @@ class MainWindow(QMainWindow):
         if t >= 1.0:
             timer.stop()
             timer.deleteLater()
+            # Snap to right edge with actual width before height adjustment
+            self._move_to_right_edge()
             QTimer.singleShot(50, self._fit_height)
 
     # ---- drag + edge snap ----
