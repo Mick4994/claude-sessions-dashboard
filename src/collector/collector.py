@@ -7,11 +7,13 @@ Status (color) is driven by SessionRegistry updates from the hook server.
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 from PySide6.QtCore import QObject, QTimer, Signal
 
 from .process_monitor import alive_sessions
+from .project_index import ProjectDirIndex
 from .session_parser import parse_session_metadata
 
 
@@ -36,6 +38,7 @@ class SessionCollector(QObject):
         self._subtitle_truncate_chars = subtitle_truncate_chars
         self._sessions: dict[str, Session] = {}
         self._timer: QTimer | None = None
+        self._index: ProjectDirIndex | None = None  # lazy-init in start()
 
     @property
     def projects_dir(self) -> Path:
@@ -49,6 +52,8 @@ class SessionCollector(QObject):
         if self._timer is None:
             self._timer = QTimer(self)
             self._timer.timeout.connect(self.scan_once)
+        if self._index is None:
+            self._index = ProjectDirIndex(self.projects_dir)
         self._timer.start(self._poll_interval_ms)
         self.scan_once()
 
@@ -59,14 +64,53 @@ class SessionCollector(QObject):
     def current_sessions(self) -> list[Session]:
         return list(self._sessions.values())
 
+    # ------------------------------------------------------------------
+    # CWD → project directory resolution
+    # ------------------------------------------------------------------
+
+    def _resolve_project_dir(self, cwd: str) -> str | None:
+        """Resolve a CWD to a ``~/.claude/projects/<name>`` directory.
+
+        Primary path: reverse index built from JSONL ``cwd`` fields.
+        Fallback:   lossy encoding for brand-new sessions with no JSONL yet.
+        """
+        # 1. Index lookup (robust, works for any encoding)
+        if self._index is not None:
+            proj_name = self._index.find_dir(cwd)
+            if proj_name is not None:
+                return proj_name
+
+        # 2. Fallback encoding for sessions without JSONL yet
+        proj_name = self._fallback_encode(cwd)
+        proj_dir = self.projects_dir / proj_name
+        return proj_name if proj_dir.is_dir() else None
+
+    @staticmethod
+    def _fallback_encode(cwd: str) -> str:
+        """Lossy fallback: replace : \\ . _ and non-ASCII codepoints with ``-``."""
+        path = str(Path(cwd))
+        path = path.replace(":", "-").replace("\\", "-").replace(".", "-").replace("_", "-")
+        return re.sub(r"[^\x00-\x7F]", "-", path)
+
+    # ------------------------------------------------------------------
+    # Polling
+    # ------------------------------------------------------------------
+
     def scan_once(self) -> None:
         seen_ids: set[str] = set()
+
+        # Refresh the reverse index so we can resolve CWD → project dir name
+        # regardless of Claude Code's opaque encoding scheme.
+        if self._index is not None:
+            self._index.refresh()
 
         # Group alive sessions by encoded CWD to share JSONL candidates.
         by_cwd: dict[str, list[dict]] = {}
         for s in alive_sessions():
-            encoded = str(Path(s["cwd"])).replace(":", "-").replace("\\", "-")
-            by_cwd.setdefault(encoded, []).append(s)
+            proj_name = self._resolve_project_dir(s["cwd"])
+            if proj_name is None:
+                continue
+            by_cwd.setdefault(proj_name, []).append(s)
 
         for proj_name, entries in by_cwd.items():
             proj_dir = self.projects_dir / proj_name
