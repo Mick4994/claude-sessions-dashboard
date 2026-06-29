@@ -9,6 +9,7 @@ class _Bus(QObject):
     requestQuit = Signal()
     requestReloadConfig = Signal()
     requestPause = Signal(bool)
+    requestRestart = Signal()
 
 
 signalBus = _Bus()

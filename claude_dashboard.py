@@ -17,6 +17,7 @@ from pathlib import Path
 # Allow `python claude_dashboard.py` to find src package
 sys.path.insert(0, str(Path(__file__).parent))
 
+from PySide6.QtCore import QProcess
 from PySide6.QtWidgets import QApplication, QSystemTrayIcon
 
 from src.collector.collector import SessionCollector
@@ -298,6 +299,24 @@ def main() -> int:
 
     signalBus.requestReloadConfig.connect(on_reload)
     signalBus.requestPause.connect(on_pause)
+
+    # -- restart: spawn a new instance then quit --
+    def on_restart():
+        # Resolve the venv pythonw executable — prefer pythonw over python
+        # so the restarted process stays window-less on Windows.
+        _venv_dir = Path(sys.executable).parent
+        _pythonw = _venv_dir / "pythonw.exe"
+        if not _pythonw.exists():
+            _pythonw = _venv_dir / "pythonw"
+        _exe = str(_pythonw) if _pythonw.exists() else sys.executable
+        QProcess.startDetached(
+            _exe,
+            [str(Path(__file__).resolve())],
+            str(Path(__file__).resolve().parent),
+        )
+        app.quit()
+
+    signalBus.requestRestart.connect(on_restart)
 
     # -- handle "show" ping from secondary instance --
     if server is not None:
